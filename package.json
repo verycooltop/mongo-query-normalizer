@@ -1,0 +1,47 @@
+{
+  "name": "mongo-query-rewriter",
+  "version": "0.1.0",
+  "description": "Normalize and simplify MongoDB query selectors: merge same-field conditions, prune conflicting branches, canonicalize structure. Semantically equivalent or tighter output.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && mocha \"test/**/*.test.js\"",
+    "prepublishOnly": "npm run build"
+  },
+  "author": "",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/verycooltop/mongo-query-rewriter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/verycooltop/mongo-query-rewriter/issues"
+  },
+  "homepage": "https://github.com/verycooltop/mongo-query-rewriter#readme",
+  "keywords": [
+    "mongodb",
+    "selector",
+    "query",
+    "rewriter",
+    "filter"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "ts-node": "^10.9.2",
+    "fast-check": "^3.23.1",
+    "mocha": "^10.8.2",
+    "mongodb": "^6.8.0",
+    "mongodb-memory-server": "^11.0.1",
+    "typescript": "^5.0.0"
+  }
+}

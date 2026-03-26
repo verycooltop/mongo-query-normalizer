@@ -1,165 +1,192 @@
-# mongo-query-rewriter
+# Mongo Query Normalizer
 
 [English](README.md) | **中文**
 
-用于 **规范化** MongoDB 查询选择器的库：在可推理的语义范围内合并同字段谓词、**化简** `$and` / `$or` / `$nor` 结构、在等价前提下做约束传播，并在**可证明矛盾**时输出**不可满足**过滤器。
+一个面向 **MongoDB 查询对象** 的**分层规范化**工具：强调**稳定、可控、可观测**，而不是激进改写或执行计划优化。
 
-单遍 AST 管线：
+---
 
-`normalize → predicateMerge → fieldConditionNormalize → simplify → predicateMerge → fieldConditionNormalize → canonicalize`
+## 为什么需要它
 
-`rewriteQuerySelector` 为 `parse →` 上述步骤（在 AST 稳定前可重复执行，有上限）`→ compile`。`simplify` 之后追加 merge/字段归一，避免同一 `$and` 下多条子句重复写字段键；内部固定点用于处理「先 canonical 排序 sibling，下一轮才能用上下文化简」的情况。
+- 查询 **结构** 在不同写法下容易发散。  
+- 没有稳定层时，**对比、日志、回放** 成本高。  
+- 需要一层 **低风险** 的 query normalization，默认行为要保守。
+
+本库**不以**「自动让查询更快」或「替代 planner」作为卖点。
+
+---
+
+## 核心特性
+
+- **按 level 分层**：`shape` → `predicate` → `logical` → `experimental`  
+- **默认安全**：默认仅 `shape`；在 **v0.1.0** 中，这也是**唯一**建议用于**一般生产环境**的 level  
+- **可观测的 `meta`**：变更、规则、告警、哈希、可选统计  
+- **稳定 / 幂等**（相同 options、未熔断时）  
+- **不透明（opaque）回退**：不支持的算子以透传为主，不做完整语义改写  
 
 ---
 
 ## 安装
 
 ```bash
-npm install mongo-query-rewriter
+npm install mongo-query-normalizer
 ```
 
 ---
 
-## 能力概览
+## 快速开始
 
-| 能力 | 说明 |
+```ts
+import { normalizeQuery } from "mongo-query-normalizer";
+
+const result = normalizeQuery({
+    $and: [{ status: "open" }, { $and: [{ priority: { $gte: 1 } }] }],
+});
+
+console.log(result.query);
+console.log(result.meta);
+```
+
+---
+
+## 默认行为说明
+
+- **默认 `level` 为 `shape`**（见 `resolveNormalizeOptions()`）。  
+- 默认**不会**做激进的谓词合并或逻辑上提。  
+- 默认目标是 **稳定与可观测**，不是「智能优化」。  
+
+---
+
+## 生产环境建议（v0.1.0）
+
+- **一般生产流量**请使用 **`shape`**；在 **v0.1.0** 中，这是**唯一**建议用于该场景的 level。  
+- `shape` 之上的 **`predicate`、`logical`、`experimental`** 属于**预览 / 不稳定**能力面，宜在**明确接受预览语义**的前提下，用于**离线分析**、**回放测试**、**语义验证**与**定向实验**，不宜作为全量在线请求的默认策略。  
+- 若启用**非 `shape`** 的 level，每次调用都会在 **`meta.warnings`** 中写入一条 **v0.1.0 版本边界说明**。在**非生产**环境（`NODE_ENV !== "production"`）下，还会在进程内对**同一 level 至多输出一次**与之对应的 **`console.warn`**，便于本地开发看到同样提示，又避免重复刷屏。  
+
+---
+
+## Level 说明
+
+### `shape`（默认）
+
+**推荐用于线上主路径**；在 **v0.1.0** 中，亦是**唯一**建议用于**一般生产环境**的层级。只做安全结构规范化，例如：
+
+- flatten logical  
+- remove empty logical  
+- collapse single-child logical  
+- dedupe logical children  
+- canonical ordering  
+
+### `predicate`
+
+**预览能力**：在 **v0.1.0** 中**不建议**作为一般生产环境的默认选择。在 `shape` 之上增加**保守**谓词整理：
+
+- 同字段谓词去重  
+- 可建模的比较类谓词合并  
+- 明确矛盾收敛为不可满足过滤器  
+- 在 `normalizePredicate` 中，**`$and` 下同名 field 的直接子 `FieldNode` 会先合并**，以便检出诸如 `{ $and: [{ a: 1 }, { a: 2 }] }` 的矛盾  
+
+### `logical`
+
+**预览能力**：在 **v0.1.0** 中**不建议**作为一般生产环境的默认选择。在 `predicate` 之上：
+
+- **检测** `$or` 中的公共谓词（默认**只检测**，默认**不上提**）  
+
+### `experimental`
+
+**实验 / 预览层**：在 **v0.1.0** 中**不建议**作为一般生产环境的默认选择。
+
+- 可在规则开启时对 `$or` 做 **hoist** 等实验性变换；**禁止**作为线上全量默认  
+
+---
+
+## `meta` 说明
+
+| 字段 | 含义 |
 |------|------|
-| **规范化** | 打平嵌套 `$and`、单子逻辑节点折叠、稳定排序 |
-| **谓词合并** | 在 `$and` 内合并同字段的多个 `FieldNode`，再交给字段条件归一 |
-| **字段条件归一** | 对 **已建模** 操作符做区间、`$in` 交集与冲突检测 |
-| **化简** | true/false 传播、OR/NOR 剪枝、AND 打平；sibling/父级 **约束传播** 仅作用于引擎声明支持的操作符 |
-| **冲突** | 在已建模规则下不可满足时返回 `IMPOSSIBLE_SELECTOR` |
-| **Canonicalize** | 最终结构收口：打平 `$and`/`$or`、收拢 `$nor:[{$or:…}]`、对可交换的 `$or`/`$nor` 子句稳定排序、字段内操作符规范顺序 |
+| `changed` | 输出相对输入是否变化（基于哈希） |
+| `level` | 实际使用的规范化层级 |
+| `appliedRules` / `skippedRules` | 规则应用轨迹 |
+| `warnings` | 观察选项开启时的非致命告警；此外，只要解析后的 level **不是** `shape`，就会**始终**附带一条 **v0.1.0 边界说明**（**不**受 `observe.collectWarnings` 影响） |
+| `bailedOut` | 是否触发安全熔断 |
+| `bailoutReason` | 熔断原因 |
+| `beforeHash` / `afterHash` | 前后稳定哈希 |
+| `stats` | 可选的前后树统计（`observe.collectMetrics`） |
 
 ---
 
-## 语义保证
+## 不支持 / opaque 行为
 
-### `rewriteQuerySelector(selector, options?)`
+以下结构通常**只透传或不参与完整语义改写**，例如：
 
-在仅使用 **已建模** 字段操作符（以及 `$and` / `$or` / `$nor`）时，重写后的选择器与原始选择在 MongoDB 中匹配**同一文档集合**。
-
-若在已建模条件之间出现**可证明的矛盾**（含传播上下文），则返回 **`IMPOSSIBLE_SELECTOR`**（`{ _id: { $exists: false } }`），与「不可满足过滤器」一致。
-
-**透传类操作符**（见下表）：库会 **保留** 原操作符与取值，**不承诺** 做合并或优化；除已有建模规则外，**不对其做冲突推断**。
-
-**不保证：** 顶层 `$expr`、`$where`、`$jsonSchema` 等与「普通字段谓词 AST」无关的能力；这些顶层键在 parse 阶段会被跳过（与此前行为一致）。
-
-**幂等（当前 fuzz 覆盖范围）：** 对 **已建模** 字段操作符与 `$and` / `$or` / `$nor`，性质测试断言 **`rewrite(rewrite(q))` 与 `rewrite(q)` 深相等**（生成器 `selectorArb`）。透传为主的形状 fuzz 较少；parse 不表示的顶层键不在保证范围内。实现上 `rewriteAst` 可在单次 API 调用内执行多遍管线直至稳定（有上限）。详见 [docs/CANONICAL_FORM.md](docs/CANONICAL_FORM.md)。
+`$nor`、`$regex`、`$not`、`$elemMatch`、`$expr`、geo / text、未知算子等。
 
 ---
 
-## 操作符支持矩阵
+## 稳定性策略
 
-### A — 完整建模（合并、冲突、收紧参与）
+**对外承诺**仅包括：
 
-`$eq`、`$gt`、`$gte`、`$lt`、`$lte`、`$in`、`$nin`、`$exists`
+- `normalizeQuery`  
+- `resolveNormalizeOptions`  
+- 入口导出的 **类型**  
 
-（`$ne` 在冲突/收紧路径中有处理，但在 `fieldConditionNormalize` 中与区间类合并方式不同，仍以安全透传为主。）
-
-### B — 透传、不优化
-
-原样 parse/compile；不参与区间与 `$in` 的合并推理；tighten 中的「支持操作符」集合不包含它们，子条件保持原样。
-
-例如：`$regex`、`$size`、`$all`、`$elemMatch`、`$mod`、`$type`，以及其它未列入 A 的字段级 `$…` 操作符。
-
-### C — 本重写器不覆盖
-
-`$where`、`$expr`（无完整表达式 AST）等。顶层 `$comment` / `$text` 不作为本库构建的过滤条件参与解析。
+**不属于**对外契约：内部 AST、`parseQuery`、`compileQuery`、各 pass/rule、工具函数等，版本间可能变化。
 
 ---
 
-## 明确不做的范围
+## 必须明确的原则
 
-- 不做执行计划分析或索引**推荐**（除非自行扩展；可选 `indexSpecs` **只改排序**）。
-- 不保证对 B 类操作符做「优化」。
-- 不覆盖完整 Mongo 查询语言。
+1. 默认是 **`shape`**。  
+2. 默认 **safe-by-default**；在 **v0.1.0** 中，**一般生产环境**仅建议 **`shape`**。  
+3. **`predicate` 及以上**可能改变查询结构，但在已建模算子上追求 **语义等价**。  
+4. **`experimental`** 仅用于实验或离线回放验证。  
+5. **opaque** 节点不会被语义重写。  
+6. 在未熔断时，输出应对相同 options 保持 **幂等**。  
+7. 本库 **不是** MongoDB 的 planner optimizer。  
 
 ---
 
-## 可选参数 `RewriteOptions`
+## 示例场景
+
+- **线上主路径**：`normalizeQuery(query)`（默认 `shape`；**v0.1.0** 约定的生产侧默认路径）  
+- **离线分析 / 回放测试 / 语义验证 / 定向实验**：仅在可接受预览语义，以及非 `shape` 时的 `meta.warnings` 边界说明（与非生产环境下按 level 一次性的 `console.warn`）时，再启用更高 level，例如：  
 
 ```ts
-interface RewriteOptions {
-    /** 仅影响 canonicalize 中 `$and` 子节点顺序，不改变匹配语义 */
-    indexSpecs?: IndexSpec[];
-}
-```
-
-```js
-const { rewriteQuerySelector } = require("mongo-query-rewriter");
-
-rewriteQuerySelector(
-    { $and: [{ b: 1 }, { a: 2 }] },
-    { indexSpecs: [{ key: { a: 1, b: 1 } }] }
-);
-```
+normalizeQuery(query, { level: "predicate" });
+```  
 
 ---
 
-## API
-
-### `rewriteQuerySelector(selector, options?)`
-
-主入口：解析 → 重写管线 → 编译为普通对象。不修改入参 `selector`。
-
-### `rewriteAst(ast, options?)`
-
-仅重写 **AST**（不 parse、不 compile），与 `rewriteQuerySelector` 使用相同的**有界固定点**规范化。适合已有 AST 或配合 `parseSelector` 的高级用法；一般业务只用 `rewriteQuerySelector` 即可。
-
-### `IMPOSSIBLE_SELECTOR`
-
-`{ _id: { $exists: false } }`，表示在已建模规则下不可满足。
-
-### 类型
+## 对外 API
 
 ```ts
-import type { Selector, IndexSpec, RewriteOptions } from "mongo-query-rewriter";
+normalizeQuery(query, options?) => { query, meta }
+resolveNormalizeOptions(options?) => ResolvedNormalizeOptions
 ```
+
+类型：`NormalizeLevel`、`NormalizeOptions`、`NormalizeRules`、`NormalizeSafety`、`NormalizeObserve`、`ResolvedNormalizeOptions`、`NormalizeResult`、`NormalizeStats`。
 
 ---
 
-## 示例
+## 语义测试（基于属性的随机测试）
 
-### 合并与规范化
+使用 `mongodb-memory-server` 与 `fast-check`，在固定文档 schema 与受限算子集合下对比 normalize 前后真实 `find` 结果（相同 `sort` / `skip` / `limit`，投影 `{ _id: 1 }`），并校验返回 `query` 的幂等。生成器见 `test/helpers/arbitraries.js`，**fast-check 的 seed / runs 统一由 `test/helpers/fc-config.js` 读取**（勿在单测里硬编码默认值）。
 
-```js
-const selector = {
-    $and: [
-        { status: "active" },
-        { score: { $gte: 0 } },
-        { score: { $lte: 100 } },
-    ],
-};
-rewriteQuerySelector(selector);
-// → { $and: [ { status: "active" }, { score: { $gte: 0, $lte: 100 } } ] }（顺序可能因 canonicalize 而异）
-```
+- `npm run test:unit`：单元测试（含 `test/contracts`、`test/invariants`、`test/performance`）  
+- `npm run test:semantic`：语义 + 全量回归 + property（默认 `FC_RUNS=200`，见 `fc-config.js`）  
+- `npm run test:semantic:quick`：本地快速跑：**降低 `FC_RUNS`（当前脚本为 45）**，仍包含 `test/regression/**` 与 `test/property/**`  
+- `npm run test:semantic:ci`：CI 较完整配置（脚本内 `FC_RUNS=200`、`FC_SEED=42`）
 
-### 冲突 → 不可满足
+环境变量：`FC_SEED`、`FC_RUNS`；可选 `FC_QUICK=1` 在未设 `FC_RUNS` 时将默认 runs 降为 50（见 `fc-config.js`）。
 
-```js
-rewriteQuerySelector({ $and: [{ a: 1 }, { a: 2 }] });
-// → IMPOSSIBLE_SELECTOR
-```
+**property 失败如何复现、何时沉淀成固定用例、命名与分类**：见 [`test/REGRESSION.md`](test/REGRESSION.md)。
 
-### 未知 / 透传操作符
-
-```js
-rewriteQuerySelector({ arr: { $size: 3 } });
-// → { arr: { $size: 3 } }  // 不会错误变成 $eq
-```
-
-### 重写后稳定（常见形状）
-
-```js
-const q = { $and: [{ a: { $gt: 1 } }, { a: { $lt: 10 } }] };
-const once = rewriteQuerySelector(q);
-const twice = rewriteQuerySelector(once);
-// 已建模逻辑 + 字段操作符下通常 deepStrictEqual(once, twice)（见上文幂等说明）
-```
+主随机语义等价**不包含**全文、地理、复杂 `$expr`、`$where`、聚合、collation 等；opaque 算子契约见 `test/contracts/opaque-operators.test.js`。
 
 ---
 
-## 许可证
+## 延伸阅读
 
-ISC。见 [LICENSE](LICENSE)。
+- [SPEC.zh-CN.md](SPEC.zh-CN.md)  
+- [docs/CANONICAL_FORM.md](docs/CANONICAL_FORM.md)  

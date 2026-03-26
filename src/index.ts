@@ -1,3 +1,12 @@
-export { rewriteAst, rewriteQuerySelector } from "./rewrite";
-export { IMPOSSIBLE_SELECTOR } from "./types";
-export type { IndexSpec, RewriteOptions, Selector } from "./types";
+export { normalizeQuery } from "./normalize";
+export { resolveNormalizeOptions } from "./options/resolve";
+export type {
+    NormalizeLevel,
+    NormalizeObserve,
+    NormalizeOptions,
+    NormalizeResult,
+    NormalizeRules,
+    NormalizeSafety,
+    NormalizeStats,
+    ResolvedNormalizeOptions,
+} from "./options/types";

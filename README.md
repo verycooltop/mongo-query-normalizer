@@ -1,179 +1,191 @@
-# mongo-query-rewriter
+# Mongo Query Normalizer
 
 **English** | [中文](README.zh-CN.md)
 
-A small library that **normalizes** MongoDB query selectors: merges same-field predicates where it understands the semantics, **simplifies** boolean structure (`$and` / `$or` / `$nor`), propagates constraints in a semantics-preserving way, and turns **provable contradictions** into a single **impossible** filter.
+A **safe, observable, level-based** normalizer for MongoDB query objects. It stabilizes query **shape**, optionally applies **low-risk predicate** normalization, and returns **predictable** output plus **metadata**—not a MongoDB planner optimizer.
 
-Pipeline (single pass):
+---
 
-`normalize → predicateMerge → fieldConditionNormalize → simplify → predicateMerge → fieldConditionNormalize → canonicalize`
+## Why it exists
 
-`rewriteQuerySelector` does `parse →` the above (repeated until the AST is stable, bounded) `→ compile`. The extra merge/normalize after `simplify` avoids duplicate field keys across `$and` array elements; the internal loop handles cases where `canonicalize` must reorder siblings before another `simplify` can apply context.
+- Query **shape** diverges across builders and hand-written filters.
+- Outputs can be **hard to compare**, log, or diff without a stable pass.
+- You need a **low-risk normalization layer** that defaults to conservative behavior.
+
+This library does **not** promise to make queries faster or to pick optimal indexes.
+
+---
+
+## Features
+
+- **Level-based** normalization (`shape` → `predicate` → `logical` → `experimental`)
+- **Safe-by-default**: default level is `shape` only (the **only** level recommended for general production use in v0.1.0)
+- **Observable** `meta`: changed flags, applied/skipped rules, warnings, hashes, optional stats
+- **Stable / idempotent** output when rules apply (same options)
+- **Opaque fallback** for unsupported operators (passthrough, not semantically rewritten)
 
 ---
 
 ## Install
 
 ```bash
-npm install mongo-query-rewriter
+npm install mongo-query-normalizer
 ```
 
 ---
 
-## What it does
-
-| Capability | Description |
-|------------|-------------|
-| **Normalization** | Flattens nested `$and`, folds single-child logical nodes, stable ordering. |
-| **Predicate merge** | Under `$and`, merges multiple `FieldNode`s on the same field into one (conditions concatenated, then normalized). |
-| **Field condition merge** | For **modeled** operators, merges ranges, intersects `$in`, detects conflicts. |
-| **Simplify** | Truthiness on `true`/`false` nodes, OR/NOR pruning, AND flattening; sibling/parent **constraint propagation** only for operators the engine models (see below). |
-| **Conflict → impossible** | If the filter is unsatisfiable under the modeled rules, returns `IMPOSSIBLE_SELECTOR`. |
-| **Canonicalize** | Final structural pass: flatten `$and`/`$or`, unwrap `$nor:[{$or:…}]`, stable sort of `$and` / `$or` / `$nor` children (where commutative), field-condition operator order. |
-
----
-
-## Semantic guarantee
-
-### `rewriteQuerySelector(selector, options?)`
-
-For queries that use only **modeled** field operators (and the logical operators `$and` / `$or` / `$nor`), the rewritten selector matches the **same set of documents** as the original in MongoDB.
-
-If a **contradiction** is detected among modeled conditions on the same field (or in propagated contexts), the result is **`IMPOSSIBLE_SELECTOR`** (`{ _id: { $exists: false } }`), which matches no documents—equivalent to an unsatisfiable filter.
-
-**Passthrough operators** (see matrix): the library **preserves** the operator and value through parse/compile and does **not** claim to optimize or merge them. It also does **not** infer conflicts involving them beyond what existing modeled rules already detect.
-
-**Not guaranteed:** equivalence for top-level `$expr`, `$where`, `$jsonSchema`, or other operators that are not represented as normal field predicates in this AST. Those keys are ignored at parse time when they appear as top-level selector keys (same as before).
-
-**Idempotency (supported range):** For **modeled** field operators and `$and` / `$or` / `$nor`, property tests assert **`rewrite(rewrite(q))` deep-equals `rewrite(q)`** on a random selector generator (`selectorArb`). Passthrough-only shapes are less heavily fuzzed; top-level keys not represented in the AST are out of scope. Implementation detail: `rewriteAst` may run the AST pipeline multiple times internally until stable (capped), but **one** `rewriteQuerySelector` call returns the fixed point.
-
-Contributor notes: [docs/CANONICAL_FORM.md](docs/CANONICAL_FORM.md).
-
----
-
-## Operator support matrix
-
-### A — Fully modeled (merge, conflict detection, tighten)
-
-`$eq`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$exists`
-
-(`$ne` is handled in conflict/tighten paths but not merged the same way as ranges in `fieldConditionNormalize`; it is still passed through safely.)
-
-### B — Preserved, not optimized
-
-Parsed and emitted as-is; **no** range/`$in` merging in `fieldConditionNormalize`; **ignored** by tighten’s supported-op filter (they stay on the child unchanged).
-
-Examples: `$regex`, `$size`, `$all`, `$elemMatch`, `$mod`, `$type`, and **any other** field-level `$…` operator not in group A.
-
-### C — Unsupported / out of scope for this rewriter
-
-`$where`, `$expr` (no full expression AST here), and similar. Top-level `$comment` / `$text` are left as non-filter clauses (parsed as “no constraint” for the filter shape this library builds).
-
----
-
-## What this library does **not** do
-
-- No execution-plan analysis or index **recommendation**.
-- No guarantee of optimizing passthrough operators (group B).
-- No full MongoDB query language coverage.
-
----
-
-## Options
-
-### `RewriteOptions`
+## Quick start
 
 ```ts
-interface RewriteOptions {
-    /** Only affects order of `$and` children in canonicalize — not matching semantics */
-    indexSpecs?: IndexSpec[];
-}
-```
+import { normalizeQuery } from "mongo-query-normalizer";
 
-Example:
+const result = normalizeQuery({
+    $and: [{ status: "open" }, { $and: [{ priority: { $gte: 1 } }] }],
+});
 
-```js
-const { rewriteQuerySelector } = require("mongo-query-rewriter");
-
-const rewritten = rewriteQuerySelector(
-    { $and: [{ b: 1 }, { a: 2 }] },
-    { indexSpecs: [{ key: { a: 1, b: 1 } }] }
-);
-// `$and` children may be ordered with `a` before `b` when index keys suggest it
+console.log(result.query);
+console.log(result.meta);
 ```
 
 ---
 
-## API
+## Default behavior
 
-### `rewriteQuerySelector(selector, options?)`
+- **Default `level` is `"shape"`** (see `resolveNormalizeOptions()`).
+- By default there is **no** aggressive predicate merge or logical hoisting.
+- The goal is **stability and observability**, not “smart optimization.”
 
-Main entry: parse, rewrite pipeline, compile to a plain selector object. Does not mutate `selector`.
+---
 
-### `rewriteAst(ast, options?)`
+## Production guidance (v0.1.0)
 
-Rewrites an existing **AST** only (no parse/compile). Applies the same bounded fixed-point normalization as `rewriteQuerySelector` (without the parse/compile shell). For advanced use or tests when you already use `parseSelector` from the operations layer. Most applications should use `rewriteQuerySelector`.
+- Use **`shape`** for **general production** traffic. It is the **only** level recommended for that purpose in v0.1.0.
+- Levels above `shape` (`predicate`, `logical`, `experimental`) are **preview / unstable** surfaces. Use them for **offline analysis**, **replay testing**, and **targeted experiments** when you explicitly accept preview semantics—not as a default for all online requests.
+- If you opt into a non-`shape` level, **`meta.warnings` includes a boundary notice** for that call. In **non-production** runs (`NODE_ENV !== "production"`), the library also prints a **matching `console.warn` once per level per process** so local development surfaces the same guidance without spamming repeated logs.
 
-### `IMPOSSIBLE_SELECTOR`
+---
 
-`{ _id: { $exists: false } }` — returned when the filter is provably unsatisfiable under modeled rules.
+## Levels
 
-### Types
+### `shape` (default)
+
+**Recommended for production hot paths** (the only v0.1.0 level recommended for general production). Safe structural normalization only, for example:
+
+- flatten logical nodes  
+- remove empty logical nodes  
+- collapse single-child logical nodes  
+- dedupe logical children  
+- canonical ordering  
+
+### `predicate`
+
+**Preview / not recommended for general production** in v0.1.0. On top of `shape`, conservative **predicate** cleanup:
+
+- dedupe same-field predicates  
+- merge comparable predicates where modeled  
+- collapse clear contradictions to an unsatisfiable filter  
+- merge **direct** `$and` children that share the same field name before further predicate work (so contradictions like `{ $and: [{ a: 1 }, { a: 2 }] }` can be detected)
+
+### `logical`
+
+**Preview / not recommended for general production** in v0.1.0. On top of `predicate`:
+
+- **detect** common predicates inside `$or` (detection / metadata; **no** default hoisting)
+
+### `experimental`
+
+**Preview / not recommended for general production** in v0.1.0. May **hoist** common predicates from `$or` when the corresponding rule is enabled—**not** for blanket production rollout.
+
+---
+
+## `meta` fields
+
+| Field | Meaning |
+|--------|---------|
+| `changed` | Structural/predicate output differs from input (hash-based) |
+| `level` | Resolved normalization level |
+| `appliedRules` / `skippedRules` | Rule tracing |
+| `warnings` | Non-fatal issues when observation is enabled, plus a **v0.1.0 boundary warning** whenever the resolved level is not `shape` (always present for that case, independent of `observe.collectWarnings`) |
+| `bailedOut` | Safety stop; output reverts to pre-pass parse for that call |
+| `bailoutReason` | Why bailout happened, if any |
+| `beforeHash` / `afterHash` | Stable hashes for diffing |
+| `stats` | Optional before/after tree metrics (`observe.collectMetrics`) |
+
+---
+
+## Unsupported / opaque behavior
+
+Structures such as **`$nor`**, **`$regex`**, **`$not`**, **`$elemMatch`**, **`$expr`**, geo/text queries, and **unknown** operators are generally treated as **opaque**: they pass through or are preserved without full semantic rewriting. They are **not** guaranteed to participate in merge or contradiction logic.
+
+---
+
+## Stability policy
+
+The **public contract** is:
+
+- `normalizeQuery`
+- `resolveNormalizeOptions`
+- the exported **types** listed in the package entry
+
+**Not** part of the public contract: internal AST, `parseQuery`, `compileQuery`, individual rules/passes, or utilities. They may change between versions.
+
+---
+
+## Principles (explicit)
+
+1. Default level is **`shape`**.  
+2. The API is **safe-by-default** for production use at that default.  
+3. **`predicate`** and above may change structure while aiming for **semantic equivalence** on modeled operators.  
+4. **`experimental`** is for experiments or offline replay—**not** default online traffic.  
+5. **Opaque** nodes are not rewritten semantically.  
+6. Output should be **idempotent** under the same options when no bailout occurs.  
+7. This library is **not** the MongoDB query planner or an optimizer.
+
+---
+
+## Example scenarios
+
+**Online main path** — use default (`shape`); this is the supported production default in v0.1.0:
 
 ```ts
-import type { Selector, IndexSpec, RewriteOptions } from "mongo-query-rewriter";
+normalizeQuery(query);
+```
+
+**Offline analysis / replay / experiments** — opt into higher levels only when you accept preview semantics and non-`shape` boundary warnings (and optional dev console hints):
+
+```ts
+normalizeQuery(query, { level: "predicate" });
 ```
 
 ---
 
-## Examples
+## Public API
 
-### Merge and canonicalize
-
-```js
-const selector = {
-    $and: [
-        { status: "active" },
-        { score: { $gte: 0 } },
-        { score: { $lte: 100 } },
-    ],
-};
-rewriteQuerySelector(selector);
-// → { $and: [ { status: "active" }, { score: { $gte: 0, $lte: 100 } } ] } (order may vary)
+```ts
+normalizeQuery(query, options?) => { query, meta }
+resolveNormalizeOptions(options?) => ResolvedNormalizeOptions
 ```
 
-### Contradiction → impossible
-
-```js
-rewriteQuerySelector({ $and: [{ a: 1 }, { a: 2 }] });
-// → IMPOSSIBLE_SELECTOR
-```
-
-### Passthrough unknown / preserved operators
-
-```js
-rewriteQuerySelector({ arr: { $size: 3 } });
-// → { arr: { $size: 3 } }  // not turned into bogus $eq
-```
-
-### `$nor`
-
-```js
-rewriteQuerySelector({ $nor: [{ status: "deleted" }] });
-// structure simplified/canonicalized; semantics preserved
-```
-
-### Stable after rewrite (common case)
-
-```js
-const q = { $and: [{ a: { $gt: 1 } }, { a: { $lt: 10 } }] };
-const once = rewriteQuerySelector(q);
-const twice = rewriteQuerySelector(once);
-// deepEqual(once, twice) for modeled logical + field operators (see idempotency note above)
-```
+Types: `NormalizeLevel`, `NormalizeOptions`, `NormalizeRules`, `NormalizeSafety`, `NormalizeObserve`, `ResolvedNormalizeOptions`, `NormalizeResult`, `NormalizeStats`.
 
 ---
 
-## License
+## Semantic tests (property-based)
 
-ISC. See [LICENSE](LICENSE).
+Randomized tests use **`mongodb-memory-server`** + **`fast-check`** to compare **real** `find` results (same `sort` / `skip` / `limit`, projection `{ _id: 1 }`) before and after `normalizeQuery` on a **fixed document schema** and a **restricted operator set** (see `test/helpers/arbitraries.js`). They assert matching **`_id` order**, **idempotency** of the returned `query`, and (for opaque operators) **non-crash / stable second pass** only. **`FC_SEED` / `FC_RUNS` defaults are centralized in `test/helpers/fc-config.js`** (also re-exported from `arbitraries.js`).
+
+- **`npm run test:unit`** — unit tests (excludes `test/semantic/**`, `test/regression/**`, `test/property/**`; includes `test/contracts/**`, `test/invariants/**`, `test/performance/**`).
+- **`npm run test:semantic`** — semantic + regression + property folders (defaults when env unset: see `fc-config.js`).
+- **`npm run test:semantic:quick`** — lower **`FC_RUNS`** (script sets `45`) + **`FC_SEED=42`**, still runs `test/regression/**` and `test/property/**`.
+- **`npm run test:semantic:ci`** — CI-oriented env (`FC_RUNS=200`, `FC_SEED=42` in script).
+
+Override property-test parameters: **`FC_SEED`**, **`FC_RUNS`**, optional **`FC_QUICK=1`** (see `fc-config.js`). How to reproduce failures and when to add a fixed regression case: **`test/REGRESSION.md`**.
+
+Full-text, geo, heavy **`$expr`**, **`$where`**, aggregation, collation, etc. stay **out** of the main semantic equivalence generator; opaque contracts live in **`test/contracts/opaque-operators.test.js`**.
+
+---
+
+## Contributor notes
+
+- [SPEC.md](SPEC.md) — behavior-oriented specification.  
+- [docs/CANONICAL_FORM.md](docs/CANONICAL_FORM.md) — idempotency and canonical shape notes.

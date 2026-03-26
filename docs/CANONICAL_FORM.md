@@ -1,47 +1,40 @@
-# Canonical form & one-step idempotency
+# Canonical form & idempotency
 
-This note is for contributors. It records **why** `rewriteQuerySelector(rewriteQuerySelector(q))` should equal `rewriteQuerySelector(q)` on the supported generator subset, and which historical issues were fixed.
+Contributor note: why **`normalizeQuery(normalizeQuery(q).query)`** should match **`normalizeQuery(q).query`** (for the same `level` and options) on supported inputs, and which historical shape issues were addressed.
 
 ## 1. Non-idempotency root causes (historical)
 
 | Class | Symptom | Stage | Fix |
 |--------|---------|--------|-----|
-| A | `$nor:[{$or:[a,b]}]` vs flat `$nor:[a,b]` | simplify / parse round-trip | Flat `$nor` children in `simplifyNor`; `normalize` + `canonicalize` unwrap single `$or` under `$nor`. |
-| B | `$or` / `$nor` child order drift | canonicalize / compile | Stable sort of `$or` and `$nor` children via `stableStructuralSortKey` (commutative ops only). |
-| C | Same field split across `$and` array elements after flatten | simplify → compile → parse | Second `predicateMerge` + `fieldConditionNormalize` after `simplify`; `fieldConditionNormalize` drops `others` ops already present in merged numeric bounds (duplicate `$lte` keys). |
-| D | `$nor` kept context-pruned shape but emitted **no-ctx** AST | simplifyNor | `kept.push(childWithCtx)` instead of `childNoCtx`. |
-| E | Sibling field context only visible **after** canonical `$and` order | simplify order vs canonicalize order | Internal **fixed-point** loop in `rewriteAst` (bounded passes) until `isDeepStrictEqual`. |
+| A | `$nor:[{$or:[a,b]}]` vs flat `$nor:[a,b]` | simplify / parse round-trip | Flat `$nor` children in simplify; normalize shape + canonicalize unwrap single `$or` under `$nor`. |
+| B | `$or` / `$nor` child order drift | canonicalize / compile | Stable sort of `$or` and `$nor` children where commutative. |
+| C | Same field split across `$and` elements after flatten | simplify → compile → parse | Predicate normalization merges same-field siblings under `$and` before further passes (at `predicate`+ levels). |
+| D | `$nor` kept context-pruned shape but emitted no-ctx AST | simplifyNor | Preserve context on kept children. |
+| E | Sibling field context only visible after canonical `$and` order | ordering vs simplify | Bounded internal passes in the normalize pipeline until stable (implementation cap). |
 
-## 2. Structural invariants (supported modeled + logical subset)
+## 2. Structural invariants (modeled subset)
 
 **Logical**
 
-- No redundant same-op nesting under `$and` / `$or` after `canonicalize`.
-- Single-child `$and` / `$or` folded (where safe).
-- Empty `$and` → true, empty `$or` → false, empty `$nor` → true (as in existing tests).
-- `$nor` uses **flat** children list (no `$nor:[{$or:[…]}]` canonical form).
-- `$or` and `$nor` children sorted by stable structural key (semantics unchanged: OR/NOR are commutative for document matching).
+- No redundant same-op nesting under `$and` / `$or` after canonicalize where rules apply.
+- Single-child `$and` / `$or` folded where safe.
+- Empty `$and` → true, empty `$or` → false, empty `$nor` → true.
+- `$or` / `$nor` children sorted by stable structural key where commutative.
 
 **Field**
 
-- Modeled operators merged per `fieldConditionNormalize`; at most one BSON key per op on compile.
-- Passthrough ops preserved; ordering among passthrough duplicates follows merge rules in `predicateMerge`.
+- At `predicate` and above: modeled operators can be merged; opaque operators stay passthrough.
 
 **`$and` ordering**
 
-- Field nodes ordered by `indexSpecs` when provided, else field name; logical / true / false after fields with stable tie-break.
-
-**`rewriteAst`**
-
-- Applies the full single pass repeatedly until stable or `REWRITE_AST_MAX_PASSES` (implementation detail; **one** `rewriteQuerySelector` call still performs the whole convergence).
+- Field nodes ordered (e.g. by field name); logical nodes after fields with stable tie-break.
 
 ## 3. Exceptions / limits
 
-- **Passthrough-heavy** selectors: stable ordering is still attempted, but arbitrary unknown operators are not fully covered by property tests.
-- **Top-level keys** ignored by parse (`$expr`, `$where`, …) are not part of the canonical AST; rewriting does not reconstruct them.
-- If the fixed-point cap is hit without convergence, the last pass output is returned (should be rare on supported inputs; report a bug with a minimal query if seen).
+- Passthrough-heavy queries: stable ordering is attempted; unknown operators are not fully covered by every test.
+- Top-level keys ignored by parse are not part of the AST; normalization does not reconstruct them.
+- If an internal safety cap triggers **bailout**, the implementation returns the **pre-normalization** parse result for that call (`meta.bailedOut`); idempotency claims apply when bailout does not occur.
 
-## 4. Property tests
+## 4. Tests
 
-- `test/index/property.test.js`: **primary** — `rewrite(rewrite(q)) === rewrite(q)` on `selectorArb(3)`.
-- Corollary: `rewrite³(q) === rewrite²(q)`.
+- `test/normalize-query.test.js` and `test/index/index.test.js`: default level, shape vs predicate behavior, exports, and basic idempotency.

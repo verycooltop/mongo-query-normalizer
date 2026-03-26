@@ -1,7 +1,7 @@
 {
-  "name": "mongo-query-rewriter",
-  "version": "0.2.0",
-  "description": "Normalize and simplify MongoDB query selectors: merge same-field conditions, detect conflicts (IMPOSSIBLE_SELECTOR), canonicalize structure. Semantically equivalent for modeled operators; passthrough for others.",
+  "name": "mongo-query-normalizer",
+  "version": "0.1.0",
+  "description": "A safe, observable, level-based normalizer for MongoDB query objects. It focuses on query shape stabilization, low-risk predicate normalization, and predictable output—not planner optimization.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -12,24 +12,28 @@
   ],
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && mocha \"test/**/*.test.js\"",
+    "test": "npm run build && npm run test:unit && npm run test:semantic",
+    "test:unit": "mocha \"test/**/*.test.js\" --ignore \"test/semantic/**/*.test.js\" --ignore \"test/regression/**/*.test.js\" --ignore \"test/property/**/*.test.js\"",
+    "test:semantic": "mocha --require ./test/helpers/mocha-semantic-hooks.js \"test/semantic/**/*.test.js\" \"test/regression/**/*.test.js\" \"test/property/**/*.test.js\"",
+    "test:semantic:quick": "FC_SEED=42 FC_RUNS=45 mocha --require ./test/helpers/mocha-semantic-hooks.js \"test/semantic/**/*.test.js\" \"test/regression/**/*.test.js\" \"test/property/**/*.test.js\"",
+    "test:semantic:ci": "FC_RUNS=200 FC_SEED=42 mocha --require ./test/helpers/mocha-semantic-hooks.js \"test/semantic/**/*.test.js\" \"test/regression/**/*.test.js\" \"test/property/**/*.test.js\"",
     "prepublishOnly": "npm run build"
   },
   "author": "",
   "license": "ISC",
   "repository": {
     "type": "git",
-    "url": "https://github.com/verycooltop/mongo-query-rewriter.git"
+    "url": "https://github.com/verycooltop/mongo-query-normalizer.git"
   },
   "bugs": {
-    "url": "https://github.com/verycooltop/mongo-query-rewriter/issues"
+    "url": "https://github.com/verycooltop/mongo-query-normalizer/issues"
   },
-  "homepage": "https://github.com/verycooltop/mongo-query-rewriter#readme",
+  "homepage": "https://github.com/verycooltop/mongo-query-normalizer#readme",
   "keywords": [
     "mongodb",
-    "selector",
     "query",
-    "rewriter",
+    "normalizer",
+    "normalize",
     "filter"
   ],
   "engines": {

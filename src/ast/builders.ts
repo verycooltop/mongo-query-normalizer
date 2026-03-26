@@ -1,27 +1,25 @@
-import type {
-    FalseNode,
-    FieldCondition,
-    FieldNode,
-    LogicalNode,
-    LogicalOperator,
-    SelectorAST,
-    TrueNode,
-} from "./types";
+import type { FalseNode, FieldNode, FieldPredicate, LogicalNode, OpaqueNode, QueryNode, TrueNode } from "./types";
 
-export class ASTNodeBuilder {
-    static logical(op: LogicalOperator, children: SelectorAST[]): LogicalNode {
-        return { type: "logical", op, children };
-    }
+export function trueNode(): TrueNode {
+    return { type: "true" };
+}
 
-    static field(fieldName: string, conditions: FieldCondition[]): FieldNode {
-        return { type: "field", field: fieldName, conditions };
-    }
+export function falseNode(): FalseNode {
+    return { type: "false" };
+}
 
-    static trueNode(): TrueNode {
-        return { type: "true" };
-    }
+export function opaqueNode(raw: unknown, reason?: string): OpaqueNode {
+    return { type: "opaque", raw, reason };
+}
 
-    static falseNode(): FalseNode {
-        return { type: "false" };
-    }
+export function andNode(children: QueryNode[]): LogicalNode {
+    return { type: "logical", op: "$and", children };
+}
+
+export function orNode(children: QueryNode[]): LogicalNode {
+    return { type: "logical", op: "$or", children };
+}
+
+export function fieldNode(field: string, predicates: FieldPredicate[]): FieldNode {
+    return { type: "field", field, predicates };
 }

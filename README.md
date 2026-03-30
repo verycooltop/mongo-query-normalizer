@@ -2,7 +2,9 @@
 
 **English** | [中文](README.zh-CN.md)
 
-A **safe, observable, level-based** normalizer for MongoDB query objects. It stabilizes query **shape**, optionally applies **low-risk predicate** normalization, and returns **predictable** output plus **metadata**—not a MongoDB planner optimizer.
+An **observable, level-based** normalizer for MongoDB query objects. It stabilizes query **shape** at the conservative default, offers **preview** higher levels for analysis and experiments, and returns **predictable** output plus **metadata**—not a MongoDB planner optimizer.
+
+> **v0.1.0 — production scope:** For **general production** traffic, use **`shape` only**—it is the **sole** level we recommend for that role in this release. **`predicate`**, **`logical`**, and **`experimental`** are **preview / experimental** surfaces; they fit **offline analysis**, **replay testing**, **semantic validation**, and **targeted experiments** better than a blanket default for all online requests.
 
 ---
 
@@ -19,7 +21,7 @@ This library does **not** promise to make queries faster or to pick optimal inde
 ## Features
 
 - **Level-based** normalization (`shape` → `predicate` → `logical` → `experimental`)
-- **Safe-by-default**: default level is `shape` only (the **only** level recommended for general production use in v0.1.0)
+- **Conservative default**: `shape` only out of the box (the **only** level we recommend for general production in v0.1.0)
 - **Observable** `meta`: changed flags, applied/skipped rules, warnings, hashes, optional stats
 - **Stable / idempotent** output when rules apply (same options)
 - **Opaque fallback** for unsupported operators (passthrough, not semantically rewritten)
@@ -134,7 +136,7 @@ The **public contract** is:
 ## Principles (explicit)
 
 1. Default level is **`shape`**.  
-2. The API is **safe-by-default** for production use at that default.  
+2. At the default **`shape`** level, the API is **intended for general production use** in v0.1.0.  
 3. **`predicate`** and above may change structure while aiming for **semantic equivalence** on modeled operators.  
 4. **`experimental`** is for experiments or offline replay—**not** default online traffic.  
 5. **Opaque** nodes are not rewritten semantically.  

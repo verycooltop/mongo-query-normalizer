@@ -30,7 +30,7 @@ Initial public release of `mongo-query-normalizer`.
   * semantic validation
   * targeted experiments
 * Higher levels are **not recommended for general production traffic** in `v0.1.0`.
-* `mongo-query-normalizer` should be understood as a **safe, observable, shape-first normalizer**, not a MongoDB query planner or optimizer.
+* `mongo-query-normalizer` should be understood as an **observable, shape-first normalizer** with a **conservative production default**, not a MongoDB query planner or optimizer.
 
 ### Notes
 

@@ -171,20 +171,197 @@ resolveNormalizeOptions(options?) => ResolvedNormalizeOptions
 
 ---
 
-## 语义测试（基于属性的随机测试）
+## 测试
 
-使用 `mongodb-memory-server` 与 `fast-check`，在固定文档 schema 与受限算子集合下对比 normalize 前后真实 `find` 结果（相同 `sort` / `skip` / `limit`，投影 `{ _id: 1 }`），并校验返回 `query` 的幂等。生成器见 `test/helpers/arbitraries.js`，**fast-check 的 seed / runs 统一由 `test/helpers/fc-config.js` 读取**（勿在单测里硬编码默认值）。
+### 测试布局
 
-- `npm run test:unit`：单元测试（含 `test/contracts`、`test/invariants`、`test/performance`）  
-- `npm run test:semantic`：语义 + 全量回归 + property（默认 `FC_RUNS=200`，见 `fc-config.js`）  
-- `npm run test:semantic:quick`：本地快速跑：**降低 `FC_RUNS`（当前脚本为 45）**，仍包含 `test/regression/**` 与 `test/property/**`  
-- `npm run test:semantic:ci`：CI 较完整配置（脚本内 `FC_RUNS=200`、`FC_SEED=42`）
+本仓库按 **对外 API**、**规范化 level** 与 **跨 level 契约** 组织测试，并保留更深的语义与回归套件。
 
-环境变量：`FC_SEED`、`FC_RUNS`；可选 `FC_QUICK=1` 在未设 `FC_RUNS` 时将默认 runs 降为 50（见 `fc-config.js`）。
+### 目录职责
 
-**property 失败如何复现、何时沉淀成固定用例、命名与分类**：见 [`test/REGRESSION.md`](test/REGRESSION.md)。
+#### `test/api/`
 
-主随机语义等价**不包含**全文、地理、复杂 `$expr`、`$where`、聚合、collation 等；opaque 算子契约见 `test/contracts/opaque-operators.test.js`。
+覆盖对外 API 与配置面。
+
+适合放在此处的验证包括：
+
+* `normalizeQuery` 的返回形态与顶层行为
+* `resolveNormalizeOptions`
+* 预览 / 警告边界行为
+* 包导出
+
+**不要**把「某一 level 专属的规范化行为」放在这里。
+
+---
+
+#### `test/levels/`
+
+覆盖每个 `NormalizeLevel` 的行为边界。
+
+当前 level：
+
+* `shape`
+* `predicate`
+* `logical`
+* `experimental`
+
+每个 level 的测试文件宜聚焦四件事：
+
+1. 该 level 的**正向能力**
+2. 该 level **明确未启用**的行为
+3. 与**相邻 level** 的对比
+4. 少量**代表性契约**
+
+断言上优先：
+
+* 规范化后的 **query 结构**
+* **跨 level 可观察的差异**
+* **稳定的对外 meta**（如 `meta.level` 等）
+
+尽量避免过度绑定：
+
+* warning **逐字全文**
+* 内部 **规则 ID 字符串**
+* **子句顺序**（除非顺序本身就是契约的一部分）
+
+---
+
+#### `test/contracts/`
+
+覆盖「应对所有 level 成立」的契约，或与单一 level 无关的默认行为。
+
+适合放在此处的内容包括：
+
+* 默认 level 行为
+* 各 level 下的幂等
+* 各 level 下的输出不变式
+* 各 level 下的 opaque 子树保留
+
+全 level 套件请配合 `test/helpers/level-contract-runner.js` 使用。
+
+---
+
+#### `test/semantic/`
+
+对照真实执行行为做**语义等价**验证，确保规范化不改变含义。
+
+该目录有意与 `levels/`、`contracts/` 分开。
+
+---
+
+#### `test/property/`
+
+基于属性的随机测试与变形（metamorphic）行为。
+
+适用于：
+
+* 随机语义检查
+* 变形不变式
+* 较宽输入空间上的校验
+
+**不要**把它当作表达「level 边界」的主战场。
+
+---
+
+#### `test/regression/`
+
+已知历史失败与手工回归用例。
+
+修复了一个不应再犯的 bug 时，把用例加在这里。
+
+---
+
+#### `test/performance/`
+
+性能护栏或与复杂度相关的行为。
+
+应聚焦性能相关预期，而非一般性的规范化结构细节。
+
+---
+
+### 辅助文件
+
+#### `test/helpers/level-runner.js`
+
+在指定 level 下执行 `normalizeQuery` 的共享封装。
+
+#### `test/helpers/level-cases.js`
+
+跨 level 测试共用的固定输入；优先把可复用的代表用例加在这里，避免在多个文件里复制同一段 fixture。
+
+#### `test/helpers/level-contract-runner.js`
+
+全 level 契约套件共用的 `LEVELS` 与 `forEachLevel` 等辅助逻辑。
+
+---
+
+### 新增测试时的规则
+
+#### 新增一条规范化规则时
+
+先问：
+
+* 是否属于对外 API 行为？→ 加到 `test/api/`
+* 是否仅在某一 level 启用？→ 加到 `test/levels/`
+* 是否应对所有 level 成立？→ 加到 `test/contracts/`
+* 是否关乎语义保持或随机验证？→ 加到 `test/semantic/` 或 `test/property/`
+* 是否针对曾坏过的场景的修复？→ 加到 `test/regression/`
+
+---
+
+#### 新增一个 level 时
+
+至少完成：
+
+1. 新增 `test/levels/<level>-level.test.js`
+2. 在 `test/helpers/level-contract-runner.js` 中注册该 level
+3. 确保全 level 契约套件会跑到它
+4. 至少补一条与相邻 level 的**对照**用例
+
+---
+
+### 测试风格建议
+
+宜：
+
+* 用**基于示例**的用例表达 level 边界
+* 断言 **query 形状**
+* 做**相邻 level 对照**
+* **共享**代表性 fixture
+
+忌：
+
+* 把 level 测试绑死在易变的实现细节上
+* 同一 fixture 只改断言表面、重复堆砌
+* 把「默认 level」契约塞进某个具体 level 文件
+* 把导出/API 测试与规范化行为测试混在同一文件语义里
+
+---
+
+### 实用对照
+
+* `api/`：**库怎么用**
+* `levels/`：**每一层做与不做**
+* `contracts/`：**哪些必须恒真**
+* `semantic` / `property` / `regression` / `performance`：**正确、稳健、效率是否仍成立**
+
+---
+
+### npm 脚本与 property 测试工具链
+
+随机语义测试使用 **`mongodb-memory-server`** 与 **`fast-check`**，在固定文档 schema 与受限算子集合下，对比 normalize 前后真实 `find` 结果（相同 `sort` / `skip` / `limit`，投影 `{ _id: 1 }`），并断言 **`_id` 顺序一致**、返回 **`query` 幂等**；对 opaque 算子仅要求**不崩溃、第二次 normalize 稳定**。生成器见 `test/helpers/arbitraries.js`；**`FC_SEED` / `FC_RUNS` 默认值统一由 `test/helpers/fc-config.js` 管理**（也由 `arbitraries.js` 再导出）。
+
+* **`npm run test`**：先 build，再 `test:unit`，再 `test:semantic`。
+* **`npm run test:api`**：仅 `test/api/**/*.test.js`。
+* **`npm run test:levels`**：`test/levels/**/*.test.js` 与 `test/contracts/*.test.js`。
+* **`npm run test:unit`**：除 `test/semantic/**`、`test/regression/**`、`test/property/**` 外的 `test/**/*.test.js`（含 `test/api/**`、`test/levels/**`、`test/contracts/**`、`test/performance/**` 等单元侧用例）。
+* **`npm run test:semantic`**：语义 + 回归 + property（环境变量未设时的默认见 `fc-config.js`）。
+* **`npm run test:semantic:quick`**：降低 **`FC_RUNS`（脚本内为 45）** 并设 **`FC_SEED=42`**，仍包含 `test/regression/**` 与 `test/property/**`。
+* **`npm run test:semantic:ci`**：面向 CI（脚本内 `FC_RUNS=200`、`FC_SEED=42`）。
+
+可通过 **`FC_SEED`**、**`FC_RUNS`**、可选 **`FC_QUICK=1`** 覆盖 property 参数（见 `fc-config.js`）。**property 失败如何复现、何时沉淀成固定用例**：见 [`test/REGRESSION.md`](test/REGRESSION.md)。
+
+主随机语义等价**不包含**全文、地理、复杂 `$expr`、`$where`、聚合、collation 等；opaque 算子契约见 **`test/contracts/opaque-operators.all-levels.test.js`**。
 
 ---
 

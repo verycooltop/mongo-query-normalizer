@@ -1,6 +1,5 @@
 dist
 node_modules
 .cursorrules
-
-# Optional integration example scripts (real MongoDB + large dataset; not for npm/GitHub)
-examples/selector-optimization/*
+.DS_Store
+__MACOSX

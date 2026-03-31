@@ -13,6 +13,8 @@
   "scripts": {
     "build": "tsc",
     "test": "npm run build && npm run test:unit && npm run test:semantic",
+    "test:api": "mocha \"test/api/**/*.test.js\"",
+    "test:levels": "mocha \"test/levels/**/*.test.js\" \"test/contracts/*.test.js\"",
     "test:unit": "mocha \"test/**/*.test.js\" --ignore \"test/semantic/**/*.test.js\" --ignore \"test/regression/**/*.test.js\" --ignore \"test/property/**/*.test.js\"",
     "test:semantic": "mocha --require ./test/helpers/mocha-semantic-hooks.js \"test/semantic/**/*.test.js\" \"test/regression/**/*.test.js\" \"test/property/**/*.test.js\"",
     "test:semantic:quick": "FC_SEED=42 FC_RUNS=45 mocha --require ./test/helpers/mocha-semantic-hooks.js \"test/semantic/**/*.test.js\" \"test/regression/**/*.test.js\" \"test/property/**/*.test.js\"",

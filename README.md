@@ -172,18 +172,209 @@ Types: `NormalizeLevel`, `NormalizeOptions`, `NormalizeRules`, `NormalizeSafety`
 
 ---
 
-## Semantic tests (property-based)
+## Testing
 
-Randomized tests use **`mongodb-memory-server`** + **`fast-check`** to compare **real** `find` results (same `sort` / `skip` / `limit`, projection `{ _id: 1 }`) before and after `normalizeQuery` on a **fixed document schema** and a **restricted operator set** (see `test/helpers/arbitraries.js`). They assert matching **`_id` order**, **idempotency** of the returned `query`, and (for opaque operators) **non-crash / stable second pass** only. **`FC_SEED` / `FC_RUNS` defaults are centralized in `test/helpers/fc-config.js`** (also re-exported from `arbitraries.js`).
+### Test layout
 
-- **`npm run test:unit`** — unit tests (excludes `test/semantic/**`, `test/regression/**`, `test/property/**`; includes `test/contracts/**`, `test/invariants/**`, `test/performance/**`).
-- **`npm run test:semantic`** — semantic + regression + property folders (defaults when env unset: see `fc-config.js`).
-- **`npm run test:semantic:quick`** — lower **`FC_RUNS`** (script sets `45`) + **`FC_SEED=42`**, still runs `test/regression/**` and `test/property/**`.
-- **`npm run test:semantic:ci`** — CI-oriented env (`FC_RUNS=200`, `FC_SEED=42` in script).
+This repository organizes tests by **API surface**, **normalization level**, and **cross-level contracts**, while preserving deeper semantic and regression suites.
+
+### Directory responsibilities
+
+#### `test/api/`
+
+Tests the public API and configuration surface.
+
+Put tests here when they verify:
+
+* `normalizeQuery` return shape and top-level behavior
+* `resolveNormalizeOptions`
+* preview / warning boundary behavior
+* package exports
+
+Do **not** put level-specific normalization behavior here.
+
+---
+
+#### `test/levels/`
+
+Tests the behavior boundary of each `NormalizeLevel`.
+
+Current levels:
+
+* `shape`
+* `predicate`
+* `logical`
+* `experimental`
+
+Each level test file should focus on four things:
+
+1. positive capabilities of that level
+2. behavior explicitly not enabled at that level
+3. contrast with the adjacent level(s)
+4. a small number of representative contracts for that level
+
+Prefer asserting:
+
+* normalized query structure
+* observable cross-level differences
+* stable public metadata
+
+Avoid overfitting to:
+
+* exact warning text
+* exact internal rule IDs
+* fixed child ordering unless ordering itself is part of the contract
+
+---
+
+#### `test/contracts/`
+
+Tests contracts that should hold across levels, or default behavior that is separate from any single level.
+
+Put tests here when they verify:
+
+* default level behavior
+* idempotency across all levels
+* output invariants across all levels
+* opaque subtree preservation across all levels
+
+Use `test/helpers/level-contract-runner.js` for all-level suites.
+
+---
+
+#### `test/semantic/`
+
+Tests semantic equivalence against execution behavior.
+These tests validate that normalization preserves meaning.
+
+This directory is intentionally separate from `levels/` and `contracts/`.
+
+---
+
+#### `test/property/`
+
+Tests property-based and metamorphic behavior.
+
+Use this directory for:
+
+* randomized semantic checks
+* metamorphic invariants
+* broad input-space validation
+
+Do not use it as the primary place to express level boundaries.
+
+---
+
+#### `test/regression/`
+
+Tests known historical failures and hand-crafted regression cases.
+
+Add a regression test here when fixing a bug that should stay fixed.
+
+---
+
+#### `test/performance/`
+
+Tests performance guards or complexity-sensitive behavior.
+
+These tests should stay focused on performance-related expectations, not general normalization structure.
+
+---
+
+### Helper files
+
+#### `test/helpers/level-runner.js`
+
+Shared helper for running a query at a specific level.
+
+#### `test/helpers/level-cases.js`
+
+Shared fixed inputs used across level tests.
+Prefer adding reusable representative cases here instead of duplicating inline fixtures.
+
+#### `test/helpers/level-contract-runner.js`
+
+Shared `LEVELS` list and helpers for all-level contract suites.
+
+---
+
+### Rules for adding new tests
+
+#### When adding a new normalization rule
+
+Ask first:
+
+* Is this a public API behavior?
+
+  * Add to `test/api/`
+* Is this enabled only at a specific level?
+
+  * Add to `test/levels/`
+* Should this hold for all levels?
+
+  * Add to `test/contracts/`
+* Is this about semantic preservation or randomized validation?
+
+  * Add to `test/semantic/` or `test/property/`
+* Is this a bug fix for a previously broken case?
+
+  * Add to `test/regression/`
+
+---
+
+#### When adding a new level
+
+At minimum, update all of the following:
+
+1. add a new `test/levels/<level>-level.test.js`
+2. register the level in `test/helpers/level-contract-runner.js`
+3. ensure all-level contract suites cover it
+4. add at least one contrast case against the adjacent level
+
+---
+
+### Testing style guidance
+
+Prefer:
+
+* example-based tests for level boundaries
+* query-shape assertions
+* contrast tests between adjacent levels
+* shared fixtures for representative cases
+
+Avoid:
+
+* coupling level tests to unstable implementation details
+* repeating the same fixture with only superficial assertion changes
+* putting default-level behavior inside a specific level test
+* mixing exports/API tests with normalization behavior tests
+
+---
+
+### Practical rule of thumb
+
+* `api/` answers: **how the library is used**
+* `levels/` answers: **what each level does and does not do**
+* `contracts/` answers: **what must always remain true**
+* `semantic/property/regression/performance` answer: **whether the system remains correct, robust, and efficient**
+
+---
+
+### npm scripts and property-test tooling
+
+Randomized semantic tests use **`mongodb-memory-server`** + **`fast-check`** to compare **real** `find` results (same `sort` / `skip` / `limit`, projection `{ _id: 1 }`) before and after `normalizeQuery` on a **fixed document schema** and a **restricted operator set** (see `test/helpers/arbitraries.js`). They assert matching **`_id` order**, **idempotency** of the returned `query`, and (for opaque operators) **non-crash / stable second pass** only. **`FC_SEED` / `FC_RUNS` defaults are centralized in `test/helpers/fc-config.js`** (also re-exported from `arbitraries.js`).
+
+* **`npm run test`** — build, then `test:unit`, then `test:semantic`.
+* **`npm run test:api`** — `test/api/**/*.test.js` only.
+* **`npm run test:levels`** — `test/levels/**/*.test.js` and `test/contracts/*.test.js`.
+* **`npm run test:unit`** — all `test/**/*.test.js` except `test/semantic/**`, `test/regression/**`, and `test/property/**` (includes `test/api/**`, `test/levels/**`, `test/contracts/**`, `test/performance/**`, and other unit tests).
+* **`npm run test:semantic`** — semantic + regression + property folders (defaults when env unset: see `fc-config.js`).
+* **`npm run test:semantic:quick`** — lower **`FC_RUNS`** (script sets `45`) + **`FC_SEED=42`**, still runs `test/regression/**` and `test/property/**`.
+* **`npm run test:semantic:ci`** — CI-oriented env (`FC_RUNS=200`, `FC_SEED=42` in script).
 
 Override property-test parameters: **`FC_SEED`**, **`FC_RUNS`**, optional **`FC_QUICK=1`** (see `fc-config.js`). How to reproduce failures and when to add a fixed regression case: **`test/REGRESSION.md`**.
 
-Full-text, geo, heavy **`$expr`**, **`$where`**, aggregation, collation, etc. stay **out** of the main semantic equivalence generator; opaque contracts live in **`test/contracts/opaque-operators.test.js`**.
+Full-text, geo, heavy **`$expr`**, **`$where`**, aggregation, collation, etc. stay **out** of the main semantic equivalence generator; opaque contracts live in **`test/contracts/opaque-operators.all-levels.test.js`**.
 
 ---
 

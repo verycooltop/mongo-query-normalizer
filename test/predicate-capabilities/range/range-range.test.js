@@ -18,12 +18,12 @@ describe("predicate-capabilities / range.range", () => {
         assert.equal(gt.value, 5);
     });
 
-    it("contradiction：$gt 与 $lt 不相交", () => {
+    it("conservative：$gt 与 $lt 不相交不判冲突（数组语义）", () => {
         const node = fieldNode("a", [
             { op: "$gt", value: 5 },
             { op: "$lt", value: 1 },
         ]);
         const r = normalizeFieldPredicateBundle(buildFieldPredicateBundleFromFieldNode(node), {});
-        assert.equal(r.contradiction, true);
+        assert.equal(r.contradiction, false);
     });
 });

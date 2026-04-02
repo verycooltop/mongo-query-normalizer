@@ -22,9 +22,9 @@ describe("api / observe traces（predicate + scope）", () => {
         assert.ok(typeof t.impossibleEmitted === "boolean");
     });
 
-    it("collectPredicateTraces：矛盾字段带 contradictionCapabilityId 与 impossibleEmitted", () => {
+    it("collectPredicateTraces：$eq × $ne 同值矛盾带 contradictionCapabilityId 与 impossibleEmitted", () => {
         const { meta } = normalizeQuery(
-            { $and: [{ a: { $eq: 1 } }, { a: { $gt: 9 } }] },
+            { $and: [{ a: { $eq: 1 } }, { a: { $ne: 1 } }] },
             {
                 level: "predicate",
                 observe: { collectPredicateTraces: true },

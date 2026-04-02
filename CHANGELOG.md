@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 Chinese version: [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md).
 
+## [0.2.2] - 2026-04-02
+
+### Changed
+
+* **Single conservative predicate semantics:** Removed internal field-cardinality policy hooks and guards; only one conservative mode remains. Same-field rewrites no longer treat incompatible `$eq`, range/`$in` mixes, or multi-`$in` as unsatisfiable without schema; scope branch pruning follows the same conservative bundle analysis.
+* **`$and` merge guard:** Sibling `FieldNode`s for the same non-dotted field are **not** coalesced when their combined predicates contain **two or more distinct `$eq` values**, so normalization does not compile to a single `{ field: lastValue }` object (which would widen the matched set vs Mongo’s `$and` of literals).
+
+### Fixed
+
+* **Compile duplicate-operator guard:** When a single `FieldNode` carries **two or more predicates with the same operator** (for example multiple `$in` siblings merged at `predicate`), `compileQuery` now emits a top-level `$and` of per-predicate field objects instead of one object with duplicate BSON keys (where the last key would win and **lose** conjuncts vs Mongo’s `$and` semantics).
+* **Conservative correctness (eq-in):**
+  * `eq ∈ in` → may collapse to `eq`
+  * `eq ∉ in` → must remain conservative (skip) and must not emit `IMPOSSIBLE_SELECTOR`
+* **Conservative correctness (dotted path / multikey):** dotted-path predicates no longer emit `IMPOSSIBLE_SELECTOR` via unsafe local contradiction deductions (notably `eq.range` / `range.range`), and dotted-path sibling `FieldNode`s under `$and` are preserved to avoid semantics-changing merges.
+* Deprecated `predicate.safetyPolicy.allowArraySensitiveRewrite` (kept for compatibility). When set, a warning is recorded in `meta.warnings`.
+
+### Testing
+
+* Semantic regression: same-field `$and` siblings under unknown array cardinality (`test/regression/cases/array-sensitive-same-field-and.test.js`).
+* Regression: predicate normalize + compile stability (no false `IMPOSSIBLE_SELECTOR`, idempotency, permutation) (`test/regression/cases/same-field-and-compile-guard.test.js`).
+
 ## [0.2.1] - 2026-04-02
 
 ### Highlights

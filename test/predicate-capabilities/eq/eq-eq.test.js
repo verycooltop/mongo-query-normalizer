@@ -24,13 +24,15 @@ describe("predicate-capabilities / eq.eq", () => {
         assert.ok(r.changed);
     });
 
-    it("contradiction：不同 $eq", () => {
+    it("conservative：不同 $eq 不判冲突（数组语义）", () => {
         const node = fieldNode("a", [
             { op: "$eq", value: 1 },
             { op: "$eq", value: 2 },
         ]);
         const r = runEngine(node);
-        assert.equal(r.contradiction, true);
+        assert.equal(r.contradiction, false);
+        const eqAtoms = r.normalizedBundle.predicates.filter((p) => p.kind === "eq");
+        assert.equal(eqAtoms.length, 2);
     });
 
     it("non-applicable：单个 $eq", () => {

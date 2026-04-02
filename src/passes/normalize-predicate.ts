@@ -10,6 +10,7 @@ import {
     compileLocalNormalizeResultToAst,
     normalizeFieldPredicateBundle,
 } from "../predicate/normalize-field-predicate-bundle";
+import { valuesEqual } from "../predicate/utils/value-equality";
 
 export function normalizePredicate(node: QueryNode, normalizeContext: NormalizeContext): QueryNode {
     return normalizePredicateRecursive(node, normalizeContext);
@@ -31,21 +32,55 @@ function normalizePredicateRecursive(node: QueryNode, normalizeContext: Normaliz
     return node;
 }
 
+function hasMultipleDistinctEqValues(predicates: FieldPredicate[]): boolean {
+    const eqValues: unknown[] = [];
+    for (const p of predicates) {
+        if (p.op === "$eq") {
+            eqValues.push(p.value);
+        }
+    }
+    if (eqValues.length < 2) {
+        return false;
+    }
+    const distinct: unknown[] = [];
+    for (const v of eqValues) {
+        if (!distinct.some((u) => valuesEqual(u, v))) {
+            distinct.push(v);
+        }
+    }
+    return distinct.length >= 2;
+}
+
 function mergeAndSiblingFieldNodesUnderAnd(children: QueryNode[], normalizeContext: NormalizeContext): QueryNode[] {
-    const byField = new Map<string, FieldPredicate[]>();
+    const byFieldNodes = new Map<string, FieldNode[]>();
     const rest: QueryNode[] = [];
 
     for (const child of children) {
         if (isFieldNode(child)) {
-            const cur = byField.get(child.field) ?? [];
-            byField.set(child.field, [...cur, ...child.predicates]);
+            // Conservative boundary:
+            // Dotted-path field conditions can be multikey-sensitive (arrays-of-documents). Merging same-field
+            // dotted-path predicates under $and can change semantics and can also cause unsafe "unsat" deductions.
+            // Keep dotted-path FieldNodes as separate $and children.
+            if (child.field.includes(".")) {
+                rest.push(child);
+                continue;
+            }
+            const cur = byFieldNodes.get(child.field) ?? [];
+            byFieldNodes.set(child.field, [...cur, child]);
         } else {
             rest.push(child);
         }
     }
 
     const merged: QueryNode[] = [];
-    for (const [field, preds] of byField) {
+    for (const [field, fieldNodes] of byFieldNodes) {
+        const preds = fieldNodes.flatMap((n) => n.predicates);
+        if (hasMultipleDistinctEqValues(preds)) {
+            for (const n of fieldNodes) {
+                merged.push(applyPredicateRulesToField(n, normalizeContext));
+            }
+            continue;
+        }
         merged.push(applyPredicateRulesToField(fieldNode(field, preds), normalizeContext));
     }
 

@@ -5,9 +5,9 @@ const { normalizeQuery } = require("../../dist/index.js");
 const { IMPOSSIBLE_SELECTOR } = require("../../dist/types.js");
 
 describe("scope / impossible-branch-pruning", () => {
-    it("inherited $eq 与分支 $eq 冲突时剪枝", () => {
+    it("inherited $eq 与分支 $eq 冲突时保守（非 IMPOSSIBLE_SELECTOR）", () => {
         const q = { $and: [{ a: 1 }, { $or: [{ a: 2 }] }] };
         const { query } = normalizeQuery(q, { level: "scope" });
-        assert.deepStrictEqual(query, IMPOSSIBLE_SELECTOR);
+        assert.notDeepEqual(query, IMPOSSIBLE_SELECTOR);
     });
 });

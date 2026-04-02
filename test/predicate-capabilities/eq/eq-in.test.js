@@ -15,25 +15,22 @@ describe("predicate-capabilities / eq.in", () => {
         assert.equal(inAtom.values.length, 2);
     });
 
-    it("contradiction：$eq 不在 $in", () => {
+    it("conservative：$eq 不在 $in 时不应判死", () => {
         const node = fieldNode("a", [
             { op: "$eq", value: 1 },
             { op: "$in", value: [2, 3] },
         ]);
         const r = normalizeFieldPredicateBundle(buildFieldPredicateBundleFromFieldNode(node), {});
-        assert.equal(r.contradiction, true);
+        assert.equal(r.contradiction, false);
     });
 
-    it("positive：多个 $in 求交集为单列表", () => {
+    it("conservative：多个 $in 不做求交（仅保留/去重值）", () => {
         const node = fieldNode("a", [
             { op: "$in", value: [1, 2, 3] },
             { op: "$in", value: [2, 3, 4] },
         ]);
         const r = normalizeFieldPredicateBundle(buildFieldPredicateBundleFromFieldNode(node), {});
-        assert.ok(r.changed);
+        assert.equal(r.changed, false);
         assert.equal(r.contradiction, false);
-        const inAtom = r.normalizedBundle.predicates.find((p) => p.kind === "in");
-        assert.ok(inAtom);
-        assert.deepStrictEqual([...inAtom.values].sort((a, b) => a - b), [2, 3]);
     });
 });

@@ -47,6 +47,23 @@ function compileFieldNode(node: FieldNode, _normalizeContext: NormalizeContext):
         } as Record<string, unknown>;
     }
 
+    const opCounts = new Map<string, number>();
+    for (const predicate of node.predicates) {
+        if (predicate.op === "raw") {
+            continue;
+        }
+        const op = predicate.op;
+        opCounts.set(op, (opCounts.get(op) ?? 0) + 1);
+    }
+    const hasDuplicateOps = [...opCounts.values()].some((c) => c > 1);
+
+    if (hasDuplicateOps) {
+        const parts = node.predicates.map((predicate) =>
+            compileFieldNode({ type: "field", field: node.field, predicates: [predicate] }, _normalizeContext)
+        );
+        return { $and: parts } as Record<string, unknown>;
+    }
+
     const compiled: Record<string, unknown> = {};
 
     for (const predicate of node.predicates) {

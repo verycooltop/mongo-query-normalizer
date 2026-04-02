@@ -28,9 +28,9 @@ describe("levels / predicate", () => {
         assert.deepStrictEqual(predicateQ, shapeQ);
     });
 
-    it("正向能力：同字段矛盾折叠为 IMPOSSIBLE_SELECTOR", () => {
+    it("保守：同字段多 literal 不折叠为 IMPOSSIBLE_SELECTOR", () => {
         const { query } = runAtLevel("predicate", contradictorySameFieldInAnd);
-        assert.deepStrictEqual(query, IMPOSSIBLE_SELECTOR);
+        assert.notDeepEqual(query, IMPOSSIBLE_SELECTOR);
     });
 
     it("正向能力：同字段多个 $gt 合并为更紧下界", () => {
@@ -38,13 +38,16 @@ describe("levels / predicate", () => {
         assert.deepStrictEqual(query, { a: { $gt: 5 } });
     });
 
-    it("正向能力：同字段 $in 在 $and 内合并为单字段（与 shape 结构不同）", () => {
+    it("compile 护栏：同字段多个 $in 不求交，输出保留 $and 兄弟（避免单对象重复键覆盖）", () => {
         const shapeQuery = runAtLevel("shape", inOverlapMerge).query;
         const predicateQuery = runAtLevel("predicate", inOverlapMerge).query;
         assert.ok(Array.isArray(shapeQuery.$and));
         assert.equal(shapeQuery.$and.length, 2);
-        assert.equal(predicateQuery.$and, undefined);
-        assert.ok(predicateQuery.a && Array.isArray(predicateQuery.a.$in));
+        assert.ok(Array.isArray(predicateQuery.$and));
+        assert.equal(predicateQuery.$and.length, 2);
+        assert.deepStrictEqual(predicateQuery, {
+            $and: [{ a: { $in: [1, 2, 3] } }, { a: { $in: [2, 3, 4] } }],
+        });
     });
 
     it("正向能力：字面量与显式 $eq 收敛为单一字段条件", () => {

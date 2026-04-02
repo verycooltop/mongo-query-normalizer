@@ -7,6 +7,7 @@ const {
     extractAppliedCapabilities,
     assertAppliedCapabilitiesWhitelisted,
 } = require("../helpers/predicate-test-helpers.js");
+const { IMPOSSIBLE_SELECTOR } = require("../../dist/types.js");
 
 describe("unit / predicate capability negative cases", () => {
     describe("eq.in negative cases", () => {
@@ -19,13 +20,17 @@ describe("unit / predicate capability negative cases", () => {
             assert.ok(!extractAppliedCapabilities(first.meta).includes("eq.in"));
         });
 
-        it("should skip eq.in when array-sensitive rewrite is disabled", () => {
-            const query = { $and: [{ a: 1 }, { a: { $in: [1, 2] } }] };
+        it("allowArraySensitiveRewrite is deprecated and must not enable eq∉in -> IMPOSSIBLE_SELECTOR", () => {
+            const query = { $and: [{ a: 1 }, { a: { $in: [2, 3] } }] };
             const { first } = assertPredicateIdempotent(query, {
-                predicate: { safetyPolicy: { allowArraySensitiveRewrite: false } },
+                predicate: { safetyPolicy: { allowArraySensitiveRewrite: true } },
             });
             assertAppliedCapabilitiesWhitelisted(first.meta);
-            assert.ok(Array.isArray(extractAppliedCapabilities(first.meta)));
+            assert.notDeepStrictEqual(first.normalized, IMPOSSIBLE_SELECTOR);
+            assert.ok(Array.isArray(first.meta.warnings));
+            assert.ok(
+                first.meta.warnings.some((w) => w.includes("allowArraySensitiveRewrite") && w.includes("deprecated"))
+            );
         });
 
         it("should remain conservative when $in contains complex values", () => {

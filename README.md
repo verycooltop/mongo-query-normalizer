@@ -8,6 +8,8 @@ An **observable, level-based** normalizer for MongoDB query objects. It stabiliz
 >
 > **As of `v0.2.0`:** predicate rewrites are intentionally narrowed to an explicitly validated surface (`eq.eq`, `eq.ne`, `eq.in`, `eq.range`, `range.range`). High-risk combinations (for example null-vs-missing, array-sensitive semantics, `$exists`/`$nin`, object-vs-dotted-path mixes, opaque mixes) remain conservative by design.
 
+> **Note:** `predicate.safetyPolicy.allowArraySensitiveRewrite` is **deprecated**. It no longer enables unsatisfiable deductions for `$eq`/`$in` non-membership (the normalizer must not emit `IMPOSSIBLE_SELECTOR` solely from `eq ∉ in` without schema).
+
 ---
 
 ## Why it exists
@@ -75,7 +77,7 @@ normalizeQuery(inputQuery, { level: "scope" }); // scope propagation / conservat
 ```
 
 - `shape`: safest structural normalization.
-- `predicate`: dedupe / merge / contradiction collapse for modeled operators.
+- `predicate`: dedupe / merge comparable predicates, and contradiction collapse only for **provably safe** modeled cases (no schema assumption; multikey/array fields stay conservative).
 - `scope`: adds inherited-constraint propagation and conservative branch decisions on top of `predicate`.
 
 ### 3) Full `options` example

@@ -11,7 +11,7 @@ function collectEqAtoms(predicates: PredicateAtom[]): Extract<PredicateAtom, { k
 
 export const eqEqCapability: PredicateCapability = {
     id: "eq.eq",
-    description: "Merge duplicate $eq and detect conflicting $eq on the same field",
+    description: "Merge duplicate $eq conservatively on the same field",
     riskLevel: "safe",
     supportedAtomKinds: ["eq"],
     isApplicable(ctx: RelationContext): boolean {
@@ -27,22 +27,22 @@ export const eqEqCapability: PredicateCapability = {
             return base;
         }
 
-        const first = eqs[0];
-        for (let i = 1; i < eqs.length; i += 1) {
-            if (!valuesEqual(first.value, eqs[i].value)) {
-                return {
-                    ...base,
-                    contradiction: true,
-                    changed: true,
-                };
+        const dedupedEqs: Extract<PredicateAtom, { kind: "eq" }>[] = [];
+        for (let i = 0; i < eqs.length; i += 1) {
+            const current = eqs[i];
+            const alreadyIncluded = dedupedEqs.some((eq) => valuesEqual(eq.value, current.value));
+            if (!alreadyIncluded) {
+                dedupedEqs.push(current);
             }
         }
 
         const rest = ctx.bundle.predicates.filter((a) => a.kind !== "eq");
-        const covered = eqs.slice(1);
+        const covered = eqs.filter(
+            (candidate) => !dedupedEqs.some((kept) => kept === candidate)
+        );
         const next = refreshBundleMetadata({
             ...ctx.bundle,
-            predicates: [first, ...rest],
+            predicates: [...dedupedEqs, ...rest],
         });
 
         return {

@@ -31,10 +31,12 @@ describe("contracts / predicate & scope 稳定语义（contract）", () => {
             assert.deepStrictEqual(query, { a: 1 });
         });
 
-        it("predicate / scope：矛盾折叠为 IMPOSSIBLE_SELECTOR", () => {
+        it("predicate / scope：同字段多 literal 保守（不输出 IMPOSSIBLE_SELECTOR）", () => {
             for (const level of LEVELS_PS) {
                 const { query } = normalizeQuery(contradictorySameFieldInAnd, { level });
-                assert.deepStrictEqual(query, IMPOSSIBLE_SELECTOR);
+                assert.notDeepEqual(query, IMPOSSIBLE_SELECTOR);
+                const twice = normalizeQuery(query, { level }).query;
+                assert.deepStrictEqual(twice, query);
             }
         });
 
@@ -67,15 +69,14 @@ describe("contracts / predicate & scope 稳定语义（contract）", () => {
     });
 
     describe("scope 改写护栏（safetyPolicy）", () => {
-        it("allowBranchPruning: false 时保留默认会被剪掉的 $or 分支", () => {
+        it("allowBranchPruning: false 与默认输出一致（数组语义下不剪冲突分支）", () => {
             const q = { $and: [{ a: 1 }, { $or: [{ a: 2 }, { b: 1 }] }] };
             const pruned = normalizeQuery(q, { level: "scope" }).query;
-            assert.ok(!JSON.stringify(pruned).includes('"a":2'));
-
             const preserved = normalizeQuery(q, {
                 level: "scope",
                 scope: { safetyPolicy: { allowBranchPruning: false } },
             }).query;
+            assert.deepStrictEqual(preserved, pruned);
             assert.ok(JSON.stringify(preserved).includes('"a":2'));
         });
 

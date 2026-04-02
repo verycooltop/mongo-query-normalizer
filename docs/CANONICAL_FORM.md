@@ -11,6 +11,7 @@ Contributor note: why **`normalizeQuery(normalizeQuery(q).query)`** should match
 | C | Same field split across `$and` elements after flatten | simplify → compile → parse | Predicate normalization merges same-field siblings under `$and` before further passes (at `predicate`+ levels). |
 | D | `$nor` kept context-pruned shape but emitted no-ctx AST | simplifyNor | Preserve context on kept children. |
 | E | Sibling field context only visible after canonical `$and` order | ordering vs simplify | Bounded internal passes in the normalize pipeline until stable (implementation cap). |
+| F | Duplicate modeled operators on one field object (e.g. two `$in`) lost at BSON compile | compile | Emit top-level `$and` of one-field branches so each operator survives as its own subdocument. |
 
 ## 2. Structural invariants (modeled subset)
 

@@ -2,13 +2,12 @@
 
 const assert = require("node:assert/strict");
 const { normalizeQuery } = require("../../dist/index.js");
-const { IMPOSSIBLE_SELECTOR } = require("../../dist/types.js");
 
 describe("scope / or-propagation", () => {
-    it("根约束进入 $or 各分支：矛盾分支被剪掉", () => {
+    it("根约束进入 $or 各分支：数组语义下不剪掉与 inherited 冲突的分支", () => {
         const q = { $and: [{ a: 1 }, { $or: [{ a: 2 }, { b: 1 }] }] };
         const { query } = normalizeQuery(q, { level: "scope" });
-        assert.deepStrictEqual(query, { $and: [{ a: 1 }, { b: 1 }] });
+        assert.deepStrictEqual(query, { $and: [{ a: 1 }, { $or: [{ a: 2 }, { b: 1 }] }] });
     });
 
     it("无外层约束时顶层 $or 保持（与 predicate 一致）", () => {

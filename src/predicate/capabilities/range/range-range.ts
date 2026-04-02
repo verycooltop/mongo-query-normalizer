@@ -88,7 +88,7 @@ export const rangeRangeCapability: PredicateCapability = {
     riskLevel: "safe",
     supportedAtomKinds: ["gt", "gte", "lt", "lte"],
     isApplicable(ctx: RelationContext): boolean {
-        if (!ctx.engine.mergeComparable && !ctx.engine.collapseContradictions) {
+        if (!ctx.engine.mergeComparable) {
             return false;
         }
         const rangeCount = ctx.bundle.predicates.filter(
@@ -128,16 +128,6 @@ export const rangeRangeCapability: PredicateCapability = {
                 continue;
             }
             others.push(p);
-        }
-
-        if (lower && upper) {
-            const cmp = compareScalarValues(lower.value, upper.value);
-            if (cmp === 1) {
-                return { ...base, contradiction: true, changed: true };
-            }
-            if (cmp === 0 && (lower.kind === "gt" || upper.kind === "lt")) {
-                return { ...base, contradiction: true, changed: true };
-            }
         }
 
         const hadMultipleRange =

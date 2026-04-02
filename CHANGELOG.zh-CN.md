@@ -2,6 +2,27 @@
 
 本文件记录本项目的重要变更，与英文 [CHANGELOG.md](CHANGELOG.md) 语义对齐。
 
+## [0.2.2] - 2026-04-02
+
+### 变更
+
+* **谓词层统一保守语义：** 移除字段基数相关内部策略与守卫，对外仅保留单一保守语义。同字段重写不再在无 schema 时将互斥 `$eq`、range/`$in` 混用或多 `$in` 判为不可满足；scope 分支剪枝与同一套保守 bundle 分析一致。
+* **`$and` 合并护栏：** 对同一非点路径字段，若兄弟 `FieldNode` 合并后会出现**两个及以上互异 `$eq` 值**，则**不**再合并为单个字段节点，避免编译成单一 `{ 字段: 最后写入值 }` 从而相对 Mongo 的 `$and` 合取**放宽**命中集。
+
+### 修复
+
+* **Compile 重复算子护栏：** 当单个 `FieldNode` 上存在**同一算子出现多次**的谓词（例如 `predicate` 层合并后仍保留多个 `$in`），`compileQuery` 改为输出顶层 `$and` 包裹的逐谓词字段对象，而不再写入带重复 BSON 键的单一对象（否则后写覆盖前写，会**丢掉**合取分支，相对 Mongo 的 `$and` 语义被放宽）。
+* **保守正确性修复（eq-in）：**
+  * `eq ∈ in` → 允许合并为 `eq`
+  * `eq ∉ in` → 保守跳过，不判死（不输出 `IMPOSSIBLE_SELECTOR`）
+* **保守正确性修复（点路径 / multikey）：** 点路径（dotted path）谓词不再通过不安全的局部矛盾推理（主要是 `eq.range` / `range.range`）输出 `IMPOSSIBLE_SELECTOR`；同时 `$and` 下同名点路径 `FieldNode` 将保留为独立子句，避免合并导致语义变化。
+* `predicate.safetyPolicy.allowArraySensitiveRewrite` 已废弃（为兼容仍保留字段）；当传入该选项时，会在 `meta.warnings` 记录一次废弃告警。
+
+### 测试
+
+* 语义回归：未知数组基数下同字段 `$and` 兄弟（`test/regression/cases/array-sensitive-same-field-and.test.js`）。
+* 回归：`predicate` 规范化与 compile 稳定性（避免误报 `IMPOSSIBLE_SELECTOR`、幂等、排列）（`test/regression/cases/same-field-and-compile-guard.test.js`）。
+
 ## [0.2.1] - 2026-04-02
 
 ### 重点更新

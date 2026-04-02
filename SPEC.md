@@ -24,6 +24,13 @@ normalized(query) = IMPOSSIBLE_SELECTOR
 
 Current `IMPOSSIBLE_SELECTOR` shape (implementation): `{ _id: { $exists: false } }` (canonical unsatisfiable filter for normal collections).
 
+**Important conservative boundary:** In the absence of schema, the normalizer must not deduce unsatisfiability solely from:
+
+- an `$eq`/`$in` non-membership check (i.e. must not emit `IMPOSSIBLE_SELECTOR` solely because `eq ∉ in`)
+- dotted-path local contradictions on multikey-sensitive fields (e.g. `$and`-combined dotted-path predicates that could be satisfied by different array elements)
+
+Such deductions are not sound for multikey (array) fields.
+
 ---
 
 ## 2. Public surface
@@ -80,16 +87,16 @@ Structural normalization only (flatten / empty removal / single-child collapse /
 
 ### 6.2 `predicate`
 
-All `shape` rules plus predicate-oriented rules: dedupe same-field predicates, merge comparable predicates where modeled, collapse contradictions.
+All `shape` rules plus predicate-oriented rules: dedupe same-field predicates, merge comparable predicates where modeled, and collapse contradictions **only when provably sound without schema** (for example `$eq` with `$ne` on the same value).
 
-**Special case:** In `normalizePredicate`, direct sibling `FieldNode`s with the **same field name** under `$and` may be **merged** before further predicate normalization, so contradictions such as `{ $and: [{ a: 1 }, { a: 2 }] }` can be detected.
+**Special case:** In `normalizePredicate`, direct sibling `FieldNode`s with the **same field name** under `$and` may be **merged** before further predicate normalization—**except** when merging would combine **two or more distinct `$eq` values** on a non-dotted path: those stay as separate `$and` conjuncts so compilation does not collapse to a single object field (which would widen matches vs Mongo `$and` semantics). **Unknown field cardinality** (multikey / array semantics) is modeled **conservatively**: incompatible `$eq` pairs, `$eq` with range, `$in` with range, multiple `$in`, and disjoint range bounds are **not** treated as unsatisfiable at this layer.
 
 ### 6.3 `scope`
 
 `predicate` plus **scope normalization**, whose primary mechanisms are:
 
 1. **Inherited constraint propagation** — phase-1 allowlisted field constraints from ancestors and `$and` siblings are merged into a per-child `ConstraintSet` when policy allows.
-2. **Conservative branch pruning** — under `allowBranchPruning` and satisfiability analysis against inherited constraints, impossible `$or` branches may compile to the impossible filter; disabled policy preserves branches.
+2. **Conservative branch pruning** — when `allowBranchPruning` is on, branch satisfiability uses the same **conservative** field-bundle analysis (no schema assumption). Branches are pruned only when that analysis reports a **modeled contradiction** (for example inherited `$eq` conflicting with a local `$ne` on the same value). Mere incompatible equalities or range/`$in` combinations across inherited and branch constraints do **not** imply unsatisfiability under multikey semantics; with pruning off, the implementation records a policy skip trace and preserves branches.
 3. **Coverage elimination** — when `allowConstraintCoverageElimination` holds and inherited metadata is clean, redundant local constraints implied by inherited bounds may be removed (narrow, implementation-tested cases only).
 
 **Optional, observe-only:** `rules.detectCommonPredicatesInOr` enables **detection** of common predicates inside `$or` (warnings / optional traces). It is **not** part of the core scope propagation story and **does not** hoist or rewrite query structure.
@@ -100,7 +107,7 @@ All `shape` rules plus predicate-oriented rules: dedupe same-field predicates, m
 - **Field bundle rejection:** `exists`, `$ne`, `$nin`, opaque fragments, and unsupported compound shapes as sources do not populate inherited sets; sibling merges skip non-extractable parts without widening semantics.
 - **Unsupported inherited metadata:** When `hasUnsupportedSemantics` is set on the merged inherited set, **coverage elimination is skipped** for that site. With `bailoutOnUnsupportedScopeMix`, the implementation may **bail out** rather than apply risky scope rewrites (see §4).
 - **Coverage elimination:** Supported only in **verified narrow cases** (e.g. identical inherited equality covering a redundant local equality on the same field). It does **not** claim general redundancy removal across arbitrary operators.
-- **Branch pruning:** Runs only when branch satisfiability is analyzed as **unsatisfiable** against inherited constraints under the same conservative model; policy off ⇒ **no** pruning. Pruning does not add new predicate merges beyond `predicate` level.
+- **Branch pruning:** Runs only when inherited plus branch field bundles yield a **reported contradiction** from the predicate local normalizer under the conservative model above; policy off ⇒ **no** pruning. Pruning does not add new predicate merges beyond `predicate` level.
 
 ---
 
@@ -118,6 +125,7 @@ All `shape` rules plus predicate-oriented rules: dedupe same-field predicates, m
 - `FalseNode` → `IMPOSSIBLE_SELECTOR`
 - `OpaqueNode` → raw passthrough per implementation
 - `FieldNode` / `LogicalNode` → BSON-shaped query object
+- **`FieldNode` with duplicate modeled operators** (same `$`-key more than once on one field object, e.g. two `$in` predicates): compiled as `{ $and: [ { field: { $in: … } }, … ] }` so BSON does not collapse repeated keys to a single value.
 
 ---
 

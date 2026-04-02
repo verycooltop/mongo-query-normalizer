@@ -20,6 +20,12 @@ import type { NormalizeMeta, NormalizeOptions, NormalizeResult, Query } from "./
  */
 export function normalizeQuery(query: Query, options?: NormalizeOptions): NormalizeResult {
     const normalizeContext = createNormalizeContext(resolveNormalizeOptions(options));
+    if (normalizeContext.options.predicate.safetyPolicy.allowArraySensitiveRewrite) {
+        addWarning(
+            normalizeContext,
+            "[mongo-query-normalizer] predicate.safetyPolicy.allowArraySensitiveRewrite is deprecated and will be removed in a future release; it no longer enables unsatisfiable (`IMPOSSIBLE_SELECTOR`) deductions for eq/in relations"
+        );
+    }
 
     const beforeNode = parseQuery(query, normalizeContext);
     recordBeforeObservation(normalizeContext, beforeNode);

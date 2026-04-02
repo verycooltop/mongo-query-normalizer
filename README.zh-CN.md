@@ -8,6 +8,8 @@
 >
 > **`v0.2.0` 起：** `predicate` 改写面有意收敛到显式验证能力（`eq.eq`、`eq.ne`、`eq.in`、`eq.range`、`range.range`）。高风险组合（如 `null`/缺失语义、数组敏感语义、`$exists`/`$nin`、整对象与点路径混用、opaque 混用）按设计保持保守处理。
 
+> **说明：** `predicate.safetyPolicy.allowArraySensitiveRewrite` 已**废弃**。它不再用于启用 `$eq`/`$in` 的“未命中即判死”（无 schema 时不得仅基于 `eq ∉ in` 就输出 `IMPOSSIBLE_SELECTOR`）。
+
 ---
 
 ## 为什么需要它
@@ -75,7 +77,7 @@ normalizeQuery(inputQuery, { level: "scope" }); // 启用 scope 传播/保守剪
 ```
 
 - `shape`：结构稳定优先，风险最低。
-- `predicate`：在已建模算子范围内做去重、合并、矛盾折叠。
+- `predicate`：在已建模算子范围内做去重、可比合并；矛盾折叠仅针对**可证明安全**的情形（默认不做 schema 假设，数组/多键字段保持保守）。
 - `scope`：在 `predicate` 之上增加继承约束传播与保守分支决策。
 
 ### 3) `options` 全量示例

@@ -20,9 +20,9 @@ Scope 图例：**allowed**、**allowed with guard**（策略开关）、**preser
 |---------------|------|------------|------|
 | `eq.eq` | supported | 是（合并类规则开启时） | 同值 `$eq` 去重 / 合并。 |
 | `eq.ne` | supported | 是 | 与同值 `$eq` 矛盾。 |
-| `eq.in` | guarded / skipped | 安全时 | 数组敏感且 `!allowArraySensitiveRewrite` 时跳过；null 语义且 `!allowNullSemanticRewrite` 时跳过。 |
-| `eq.range` | supported | 是 | `$eq` 与 range 冲突。 |
-| `range.range` | supported | 是 | 可比 range 合并。 |
+| `eq.in` | supported（保守） | 是（合并类规则开启时） | 仅做安全改写：`$in` 值去重；当 `$eq` 值明确包含在每个 `$in` 列表中时，可移除冗余 `$in`（收敛到 `$eq`）。当 `eq ∉ in` 时**不得**仅据此判定不可满足。 |
+| `eq.range` | supported（点路径保守） | 是 | `$eq` 与 range 冲突；对点路径（dotted path）在 multikey 场景下需保守处理，不得仅基于局部矛盾推断不可满足。 |
+| `range.range` | supported（点路径保守） | 是 | 可比 range 合并；对点路径（dotted path）在 multikey 场景下需保守处理，不得仅基于局部矛盾推断不可满足。 |
 | `in.in` | unsupported | — | 默认 registry 未注册。 |
 | `in.nin` | unsupported | — | 同上。 |
 | `exists.*` | unsupported | — | IR 有原子，默认无专门合并 capability。 |

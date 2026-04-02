@@ -14,17 +14,16 @@ describe("contracts / scope 与 surface 回归", () => {
         assert.equal(Object.prototype.hasOwnProperty.call(r.scope.safetyPolicy, "allowNorPropagation"), false);
     });
 
-    it("IMPOSSIBLE_SELECTOR：二次 normalize（predicate）稳定", () => {
+    it("同字段多 literal：predicate 二次 normalize 稳定且非 IMPOSSIBLE_SELECTOR", () => {
         const once = normalizeQuery(contradictorySameFieldInAnd, { level: "predicate" });
-        assert.deepStrictEqual(once.query, IMPOSSIBLE_SELECTOR);
+        assert.notDeepEqual(once.query, IMPOSSIBLE_SELECTOR);
         const twice = normalizeQuery(once.query, { level: "predicate" });
-        assert.deepStrictEqual(twice.query, IMPOSSIBLE_SELECTOR);
+        assert.deepStrictEqual(twice.query, once.query);
     });
 
-    it("parse → normalize → compile → normalize：矛盾查询幂等", () => {
+    it("parse → normalize → compile → normalize：同字段多 literal 幂等", () => {
         const first = normalizeQuery(contradictorySameFieldInAnd, { level: "predicate" });
         const second = normalizeQuery(first.query, { level: "predicate" });
-        assert.deepStrictEqual(second.query, IMPOSSIBLE_SELECTOR);
         assert.deepStrictEqual(second.query, first.query);
     });
 

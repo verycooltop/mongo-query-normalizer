@@ -13,10 +13,10 @@ function assertIdempotentAtPredicate(query) {
 }
 
 describe("predicate convergence / same-field bundle closure", () => {
-    it("eq × in：矛盾单轮为 IMPOSSIBLE_SELECTOR", () => {
+    it("eq × in：未命中时保持保守（不判死）", () => {
         const q = { $and: [{ a: { $eq: 1 } }, { a: { $in: [2, 3] } }] };
         const { query } = normalizeQuery(q, { level: "predicate" });
-        assert.deepStrictEqual(query, IMPOSSIBLE_SELECTOR);
+        assert.deepStrictEqual(query, { a: { $eq: 1, $in: [2, 3] } });
         assertIdempotentAtPredicate(q);
     });
 
@@ -27,37 +27,51 @@ describe("predicate convergence / same-field bundle closure", () => {
         assertIdempotentAtPredicate(q);
     });
 
-    it("eq × bounds：兼容时去掉冗余 range", () => {
+    it("eq × bounds：保守保留合取（不按单元素语义去掉 range）", () => {
         const q = { $and: [{ a: { $eq: 5 } }, { a: { $gt: 1 } }, { a: { $lte: 9 } }] };
         const { query } = normalizeQuery(q, { level: "predicate" });
-        assert.deepStrictEqual(query, { a: 5 });
+        assert.deepStrictEqual(query, { a: { $eq: 5, $gt: 1, $lte: 9 } });
+        assert.notDeepEqual(query, IMPOSSIBLE_SELECTOR);
         assertIdempotentAtPredicate(q);
     });
 
-    it("eq × bounds：矛盾为 IMPOSSIBLE_SELECTOR", () => {
+    it("eq × bounds：冲突不判 IMPOSSIBLE_SELECTOR", () => {
         const q = { $and: [{ a: { $eq: 1 } }, { a: { $gt: 5 } }] };
-        assert.deepStrictEqual(normalizeQuery(q, { level: "predicate" }).query, IMPOSSIBLE_SELECTOR);
-    });
-
-    it("in × bounds：空交集为 IMPOSSIBLE_SELECTOR", () => {
-        const q = { $and: [{ a: { $in: [1, 2] } }, { a: { $gt: 5 } }] };
-        assert.deepStrictEqual(normalizeQuery(q, { level: "predicate" }).query, IMPOSSIBLE_SELECTOR);
-    });
-
-    it("in × bounds：收紧 $in 并去掉被蕴含的 range", () => {
-        const q = { $and: [{ a: { $in: [1, 6, 7] } }, { a: { $gt: 5 } }] };
-        assert.deepStrictEqual(normalizeQuery(q, { level: "predicate" }).query, { a: { $in: [6, 7] } });
+        const { query } = normalizeQuery(q, { level: "predicate" });
+        assert.deepStrictEqual(query, { a: { $eq: 1, $gt: 5 } });
+        assert.notDeepEqual(query, IMPOSSIBLE_SELECTOR);
         assertIdempotentAtPredicate(q);
     });
 
-    it("bounds × bounds：矛盾为 IMPOSSIBLE_SELECTOR", () => {
-        const q = { $and: [{ a: { $gt: 5 } }, { a: { $lt: 3 } }] };
-        assert.deepStrictEqual(normalizeQuery(q, { level: "predicate" }).query, IMPOSSIBLE_SELECTOR);
+    it("in × bounds：空交集不判 IMPOSSIBLE_SELECTOR", () => {
+        const q = { $and: [{ a: { $in: [1, 2] } }, { a: { $gt: 5 } }] };
+        const { query } = normalizeQuery(q, { level: "predicate" });
+        assert.deepStrictEqual(query, { a: { $gt: 5, $in: [1, 2] } });
+        assert.notDeepEqual(query, IMPOSSIBLE_SELECTOR);
+        assertIdempotentAtPredicate(q);
     });
 
-    it("混合：$in 交集 × $gt", () => {
+    it("in × bounds：不按单元素语义收紧 $in 或去掉 range", () => {
+        const q = { $and: [{ a: { $in: [1, 6, 7] } }, { a: { $gt: 5 } }] };
+        const { query } = normalizeQuery(q, { level: "predicate" });
+        assert.deepStrictEqual(query, { a: { $gt: 5, $in: [1, 6, 7] } });
+        assertIdempotentAtPredicate(q);
+    });
+
+    it("bounds × bounds：不相交不判 IMPOSSIBLE_SELECTOR", () => {
+        const q = { $and: [{ a: { $gt: 5 } }, { a: { $lt: 3 } }] };
+        const { query } = normalizeQuery(q, { level: "predicate" });
+        assert.deepStrictEqual(query, { a: { $gt: 5, $lt: 3 } });
+        assert.notDeepEqual(query, IMPOSSIBLE_SELECTOR);
+        assertIdempotentAtPredicate(q);
+    });
+
+    it("混合：多个 $in 不求交；$gt 仅与可比 range 规则合并；compile 不丢重复 $in", () => {
         const q = { $and: [{ a: { $in: [1, 2, 3] } }, { a: { $in: [2, 3, 4] } }, { a: { $gt: 2 } }] };
-        assert.deepStrictEqual(normalizeQuery(q, { level: "predicate" }).query, { a: { $in: [3] } });
+        const { query } = normalizeQuery(q, { level: "predicate" });
+        assert.deepStrictEqual(query, {
+            $and: [{ a: { $gt: 2 } }, { a: { $in: [1, 2, 3] } }, { a: { $in: [2, 3, 4] } }],
+        });
         assertIdempotentAtPredicate(q);
     });
 

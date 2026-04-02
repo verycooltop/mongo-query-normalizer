@@ -22,9 +22,9 @@ Legend for scope: **allowed**, **allowed with guard** (policy flag), **preserve 
 |---------------|--------|-------------|--------|
 | `eq.eq` | supported | yes (when merge rules on) | Dedupe / merge same-value `$eq`. |
 | `eq.ne` | supported | yes | Contradiction vs same-value `$eq`. |
-| `eq.in` | guarded / skipped | yes when safe | Skipped when `hasArraySensitiveSemantics` and `!allowArraySensitiveRewrite`; skipped when `hasNullSemantics` and `!allowNullSemanticRewrite`. |
-| `eq.range` | supported | yes | `$eq` vs range clash. |
-| `range.range` | supported | yes | Comparable range merge. |
+| `eq.in` | supported (conservative) | yes (when merge rules on) | Safe-only: dedupe `$in` values; if `$eq` value is contained in every `$in`, may drop redundant `$in` (collapse-to-eq). Must **not** emit unsat solely from `eq ∉ in`. |
+| `eq.range` | supported (conservative on dotted paths) | yes | `$eq` vs range clash. For dotted paths, must remain conservative and avoid emitting unsat solely from local contradictions (multikey-sensitive). |
+| `range.range` | supported (conservative on dotted paths) | yes | Comparable range merge. For dotted paths, must remain conservative and avoid emitting unsat solely from local contradictions (multikey-sensitive). |
 | `in.in` | unsupported | — | Not registered in default capability set (phase governance). |
 | `in.nin` | unsupported | — | Same. |
 | `exists.*` | unsupported | — | Atoms exist in IR but no dedicated merge capability in default registry. |

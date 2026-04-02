@@ -10,9 +10,9 @@ const {
 } = require("../helpers/level-cases.js");
 
 describe("levels / scope（继承传播、剪枝、覆盖消除与 predicate 差异）", () => {
-    it("继承 predicate：矛盾仍折叠为 IMPOSSIBLE_SELECTOR", () => {
+    it("继承 predicate：同字段多 literal 保守（非 IMPOSSIBLE_SELECTOR）", () => {
         const { query } = runAtLevel("scope", contradictorySameFieldInAnd);
-        assert.deepStrictEqual(query, IMPOSSIBLE_SELECTOR);
+        assert.notDeepEqual(query, IMPOSSIBLE_SELECTOR);
     });
 
     it("继承 predicate：可比谓词合并与 predicate 一致", () => {
@@ -35,10 +35,10 @@ describe("levels / scope（继承传播、剪枝、覆盖消除与 predicate 差
         assert.deepStrictEqual(query, { a: 1 });
     });
 
-    it("保守剪枝：与 inherited a:1 矛盾的 $or 分支去除", () => {
+    it("保守：与 inherited a:1 冲突的 $or 分支不因数组语义而剪除", () => {
         const q = { $and: [{ a: 1 }, { $or: [{ a: 2 }, { b: 1 }] }] };
         const { query } = normalizeQuery(q, { level: "scope" });
-        assert.ok(!JSON.stringify(query).includes('"a":2'));
+        assert.ok(JSON.stringify(query).includes('"a":2'));
     });
 
     it("与 predicate 差异：顶层 $or + 子矛盾时 scope 不额外改写（与 predicate 同形）", () => {

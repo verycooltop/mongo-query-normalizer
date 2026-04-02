@@ -48,14 +48,6 @@ export function planRelations(orderedCapabilities: PredicateCapability[], ctx: R
             continue;
         }
 
-        if (cap.id === "eq.in" && ctx.bundle.metadata.hasArraySensitiveSemantics && !ctx.safety.allowArraySensitiveRewrite) {
-            skippedCapabilities.push({
-                id: cap.id,
-                reason: "array-sensitive rewrite disabled",
-            });
-            continue;
-        }
-
         if (cap.id === "eq.in" && ctx.bundle.metadata.hasNullSemantics && !ctx.safety.allowNullSemanticRewrite) {
             skippedCapabilities.push({
                 id: cap.id,
